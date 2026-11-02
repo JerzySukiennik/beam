@@ -1,4 +1,5 @@
-// Beam: wall photos (built-in demos and uploads kept in IndexedDB) and turning demo annotations in photo pixels into a scene.
+// Beam: walls. Built-in demo photos, uploads kept in IndexedDB, live walls lit by a real projector (no photo, photo
+// space is projector space), and turning demo annotations in photo pixels into a scene.
 
 import * as H from './math/homography.js';
 import * as P from './math/poly.js';
@@ -42,6 +43,22 @@ export function defaultQuad(w, h, aspect = 16 / 9) {
   return [[x0, y0], [x0 + qw, y0], [x0 + qw, y0 + qh], [x0, y0 + qh]];
 }
 
+export function liveQuad(jw, jh) {
+  return [[0, 0], [jw, 0], [jw, jh], [0, jh]];
+}
+
+export function liveState(wall, size) {
+  const st = blankState(wall);
+  const [jw, jh] = size || [1280, 720];
+  st.proj = { jw, jh, auto: true };
+  st.projQuad = liveQuad(jw, jh);
+  const hh = jh * 0.42, ww = (hh * 21) / 29.7, cx = jw / 2, cy = jh / 2;
+  st.calibJ = [[cx - ww / 2, cy - hh / 2], [cx + ww / 2, cy - hh / 2], [cx + ww / 2, cy + hh / 2], [cx - ww / 2, cy + hh / 2]];
+  st.calibCm = { w: 21, h: 29.7 };
+  st.settings.inset = false;
+  return st;
+}
+
 export function presetQuad(kind, w, h) {
   const q = defaultQuad(w, h);
   const [tl, tr, br, bl] = q;
@@ -77,11 +94,26 @@ export class Walls {
   get(id) { return this.byId.get(id); }
 
   saveList() {
-    const ups = this.list.filter(w => !w.builtin).map(({ id, name, size, projQuad }) => ({ id, name, size, projQuad }));
+    const ups = this.list.filter(w => !w.builtin).map(({ id, name, size, projQuad, kind }) => ({ id, name, size, projQuad, kind }));
     try { localStorage.setItem(LIST, JSON.stringify(ups)); } catch (e) { }
   }
 
+  createLive(name) {
+    const wall = { id: 'l' + Date.now().toString(36), name, kind: 'live', builtin: false };
+    this.add(wall);
+    this.saveList();
+    return wall;
+  }
+
+  rename(id, name) {
+    const w = this.byId.get(id);
+    if (!w || w.builtin) return;
+    w.name = name.trim().slice(0, 30) || w.name;
+    this.saveList();
+  }
+
   async image(wall) {
+    if (wall.kind === 'live') return null;
     if (wall.img) return wall.img;
     let url = wall.src;
     if (!wall.builtin) {
@@ -94,6 +126,7 @@ export class Walls {
   }
 
   async thumb(wall) {
+    if (wall.kind === 'live') return null;
     if (wall.builtin) return wall.src;
     const img = await this.image(wall);
     return img.src;
@@ -122,7 +155,7 @@ export class Walls {
     this.list = this.list.filter(x => x.id !== id);
     this.byId.delete(id);
     this.saveList();
-    try { await idbDo('readwrite', s => s.delete(id)); } catch (e) { }
+    if (w.kind !== 'live') try { await idbDo('readwrite', s => s.delete(id)); } catch (e) { }
     try { localStorage.removeItem('beam.v1.scene.' + id); } catch (e) { }
   }
 }

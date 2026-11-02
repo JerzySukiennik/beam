@@ -1,4 +1,5 @@
-// Beam: editor interaction. Drawing tools with boolean modes, selection, vertex edit, items, projector and calibration handles, and the 2D overlay.
+// Beam: editor interaction. Drawing tools with boolean modes, selection, vertex edit, items, projector and calibration
+// handles, and the 2D overlay, both in the editor panes and straight on the wall through the projector window.
 
 import * as P from '../math/poly.js';
 import * as H from '../math/homography.js';
@@ -100,12 +101,13 @@ export class Tools {
     this.canvas = app.overlay;
     this.ctx = this.canvas.getContext('2d');
     this.dpr = window.devicePixelRatio || 1;
+    this.hatches = new WeakMap();
     const st = app.stage;
     st.addEventListener('pointerdown', e => this.down(e));
     st.addEventListener('pointermove', e => this.move(e));
     st.addEventListener('pointerup', e => this.up(e));
     st.addEventListener('pointercancel', e => this.up(e));
-    st.addEventListener('pointerleave', () => { if (!this.drag) { this.mouse = null; this.hover = null; this.app.overlayDirty(); this.app.ui.coords(null); } });
+    st.addEventListener('pointerleave', () => this.leave());
     st.addEventListener('dblclick', e => this.dbl(e));
     st.addEventListener('wheel', e => this.wheel(e), { passive: false });
     st.addEventListener('contextmenu', e => e.preventDefault());
@@ -125,9 +127,23 @@ export class Tools {
     this.canvas.style.height = h + 'px';
   }
 
-  local(e) {
+  where(e) {
+    const pr = this.app.projector;
+    if (pr.attached && e.view === pr.win) {
+      const [mx, my] = pr.local(e);
+      return { mx, my, pane: pr.pane, ext: true };
+    }
     const r = this.app.stage.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    return { mx, my, pane: this.views.paneAt(mx, my), ext: false };
+  }
+
+  leave() {
+    if (this.drag) return;
+    this.mouse = null;
+    this.hover = null;
+    this.app.overlayDirty();
+    this.app.ui.coords(null);
   }
 
   toW(pane, mx, my) {
@@ -181,9 +197,11 @@ export class Tools {
   }
 
   hint() {
-    const step = this.app.step;
+    const step = this.app.step, live = this.app.live;
     if (step === 1) return 'Wybierz ścianę po prawej albo wgraj swoje zdjęcie. Kółko/gładzik: przesuwanie, Cmd + kółko: zoom.';
+    if (step === 2 && live) return 'Otwórz okno projektora, przenieś je na ekran projektora i kliknij w obraz na ścianie: włączy się pełny ekran.';
     if (step === 2) return 'Przeciągnij rogi albo środek obrazu projektora. Tak ustawiasz, gdzie na zdjęciu pada światło.';
+    if (step === 3 && live) return 'Przeciągnij krzyżyki na rogi kartki: myszką prosto na ścianie albo tutaj. Strzałki: o 1 piksel, Shift o 10, Tab: następny krzyżyk.';
     if (step === 3) return 'Przeciągnij 4 kolorowe krzyżyki na rogi prostokątnego obiektu i wpisz jego wymiary. Strzałki: precyzyjnie.';
     if (step === 5) return 'Strzałki: ruch, Spacja albo ↑: skok, ↓: zeskok z półki, Shift: chwyt (tryb gumowy). R: od nowa.';
     if (this.poly) return this.tool === 'quad' ? `Narożnik ${this.poly.pts.length + 1} z 4.` : 'Enter albo klik w pierwszy punkt: zamknij. Backspace: cofnij punkt. Esc: anuluj.';
@@ -274,32 +292,34 @@ export class Tools {
   }
 
   down(e) {
-    if (e.button === 0 && e.target !== this.app.stage && e.target !== this.canvas && e.target !== this.app.glCanvas) return;
-    const [mx, my] = this.local(e);
-    const pane = this.views.paneAt(mx, my);
+    const { mx, my, pane, ext } = this.where(e);
+    if (!ext && e.button === 0 && e.target !== this.app.stage && e.target !== this.canvas && e.target !== this.app.glCanvas) return;
     if (!pane) return;
-    try { this.app.stage.setPointerCapture(e.pointerId); } catch (err) { }
+    try { (ext ? e.target : this.app.stage).setPointerCapture(e.pointerId); } catch (err) { }
     if (e.button === 1 || e.button === 2 || this.spaceDown) {
-      this.drag = { kind: 'pan', pane, last: [mx, my] };
+      if (!ext) this.drag = { kind: 'pan', pane, last: [mx, my] };
       return;
     }
     const step = this.app.step;
     if (step === 2 && pane.id === 'room' && this.downProjector(pane, mx, my)) return;
-    if (step === 3 && pane.id === 'room' && this.downCalib(pane, mx, my)) return;
+    if (step === 3 && pane.id !== 'editor' && this.downCalib(pane, mx, my)) return;
     if (step === 4 && this.downTool(pane, mx, my, e)) return;
-    this.drag = { kind: 'pan', pane, last: [mx, my] };
+    if (!ext) this.drag = { kind: 'pan', pane, last: [mx, my] };
   }
 
   move(e) {
-    const [mx, my] = this.local(e);
+    const w = this.where(e);
+    const { mx, my } = w;
     const d = this.drag;
-    const pane = d ? d.pane : this.views.paneAt(mx, my);
+    const pane = d ? d.pane : w.pane;
     this.mouse = pane ? { mx, my, pane, alt: e.altKey, shift: e.shiftKey } : null;
     if (d) {
       if (d.kind === 'pan') {
-        this.views.pan(d.pane, mx - d.last[0], my - d.last[1]);
+        if (d.pane.id !== 'proj') {
+          this.views.pan(d.pane, mx - d.last[0], my - d.last[1]);
+          this.app.viewChanged();
+        }
         d.last = [mx, my];
-        this.app.viewChanged();
       } else this.dragMove(d, mx, my, e);
     } else if (pane) this.updateHover(pane, mx, my);
     this.app.overlayDirty();
@@ -310,15 +330,14 @@ export class Tools {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
-    const [mx, my] = this.local(e);
+    const { mx, my } = this.where(e);
     this.dragEnd(d, mx, my, e);
     this.app.overlayDirty();
   }
 
   dbl(e) {
     if (this.app.step !== 4) return;
-    const [mx, my] = this.local(e);
-    const pane = this.views.paneAt(mx, my);
+    const { mx, my, pane } = this.where(e);
     if (!pane) return;
     if (this.poly && this.tool === 'poly') { this.finishPoly(); return; }
     if (this.tool === 'vertex') this.insertVertex(pane, mx, my);
@@ -330,9 +349,8 @@ export class Tools {
 
   wheel(e) {
     e.preventDefault();
-    const [mx, my] = this.local(e);
-    const pane = this.views.paneAt(mx, my);
-    if (!pane) return;
+    const { mx, my, pane, ext } = this.where(e);
+    if (!pane || ext) return;
     if (e.ctrlKey || e.metaKey) this.views.zoomAt(pane, mx, my, Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.0022)));
     else this.views.pan(pane, -e.deltaX, -e.deltaY);
     this.app.viewChanged();
@@ -348,6 +366,7 @@ export class Tools {
   }
 
   downProjector(pane, mx, my) {
+    if (this.app.live) return false;
     const q = this.st.projQuad;
     let idx = -1, best = 16;
     q.forEach((p, i) => {
@@ -859,7 +878,61 @@ export class Tools {
       this.drawPane(pane);
       ctx.restore();
     }
-    if (v.room.on && v.inset.on && this.app.step >= 2 && this.st.settings.inset) this.drawInset();
+    if (v.room.on && v.inset.on && this.app.insetOn()) this.drawInset();
+    const pr = this.app.projector;
+    const pc = pr.overlay();
+    if (!pc) return;
+    this.ctx = pc;
+    try { this.drawWall(pr.pane); } finally { this.ctx = ctx; }
+  }
+
+  drawWall(pane) {
+    const step = this.app.step;
+    if (!this.app.live || step < 2 || step > 4) return;
+    if (step === 3) this.drawCalib(pane);
+    if (step === 4 && this.space.ok) this.drawEdit(pane);
+    this.drawCursor(pane);
+  }
+
+  drawCursor(pane) {
+    const m = this.mouse;
+    if (!m) return;
+    let j = this.views.toSpace(m.pane, m.mx, m.my);
+    if (m.pane.id === 'editor') j = this.space.ok ? this.space.wToJ(j[0], j[1]) : null;
+    if (!j) return;
+    const [x, y] = this.views.toScreen(pane, j[0], j[1]);
+    const ctx = this.ctx;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      ctx.moveTo(x + dx * 5, y + dy * 5);
+      ctx.lineTo(x + dx * 17, y + dy * 17);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(x, y, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawFrame(pane) {
+    const { jw, jh } = this.st.proj;
+    const c = [[0, 0], [jw, 0], [jw, jh], [0, jh]].map(p => this.views.toScreen(pane, p[0], p[1]));
+    const ctx = this.ctx;
+    ctx.strokeStyle = 'rgba(160,175,210,0.45)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    c.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (this.app.step === 2) {
+      const pr = this.app.projector;
+      const state = pr.attached ? (pr.isFull() ? 'na projektorze' : 'okno połączone') : 'okno zamknięte';
+      this.label(c[3][0] + 10, c[3][1] - 30, `Obraz projektora ${jw}×${jh} · ${state}`);
+    }
   }
 
   path(pane, ring, closed) {
@@ -893,8 +966,9 @@ export class Tools {
   }
 
   drawPane(pane) {
-    const ctx = this.ctx, step = this.app.step;
-    const t = pane.id === 'room' ? 'POKÓJ · podgląd z projektora' : 'ŚCIANA · wyprostowana, w cm';
+    const ctx = this.ctx, step = this.app.step, live = this.app.live;
+    const t = pane.id === 'room' ? (live ? 'PROJEKTOR · obraz na ścianie' : 'POKÓJ · podgląd z projektora') : 'ŚCIANA · wyprostowana, w cm';
+    if (live && pane.id === 'room' && step <= 4) this.drawFrame(pane);
     let y = pane.y + 12;
     if (step === 5) {
       ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif';
@@ -906,7 +980,7 @@ export class Tools {
       this.label(pane.x + pane.w / 2 - 150, pane.y + pane.h / 2 - 10, 'Krzyżyki kalibracji są ułożone krzywo, popraw je w kroku 3', '#ffd23d');
       return;
     }
-    if (step === 2 && pane.id === 'room') this.drawProjector(pane);
+    if (step === 2 && pane.id === 'room' && !live) this.drawProjector(pane);
     if (step === 3) this.drawCalib(pane);
     if (step === 4) this.drawEdit(pane);
   }
@@ -932,7 +1006,7 @@ export class Tools {
 
   drawCalib(pane) {
     const ctx = this.ctx, st = this.st;
-    if (pane.id === 'room') {
+    if (pane.id !== 'editor') {
       st.calibJ.forEach((j, i) => {
         const s = this.jToS(pane, j[0], j[1]);
         if (!s) return;
@@ -1119,15 +1193,17 @@ export class Tools {
   }
 
   hatch() {
-    if (this._hatch) return this._hatch;
+    const had = this.hatches.get(this.ctx);
+    if (had) return had;
     const c = document.createElement('canvas');
     c.width = c.height = 8;
     const g = c.getContext('2d');
     g.strokeStyle = 'rgba(210,220,245,0.35)';
     g.lineWidth = 1;
     g.beginPath(); g.moveTo(0, 8); g.lineTo(8, 0); g.stroke();
-    this._hatch = this.ctx.createPattern(c, 'repeat');
-    return this._hatch;
+    const pat = this.ctx.createPattern(c, 'repeat');
+    this.hatches.set(this.ctx, pat);
+    return pat;
   }
 
   drawInset() {

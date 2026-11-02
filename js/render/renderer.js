@@ -1,6 +1,6 @@
 // Beam: render pipeline. The game is drawn straight into projector pixels through the wall -> projector homography,
 // bloomed (characters go on top unbloomed, so they stay readable), then shown as the HDMI image, as light falling
-// on the room photo, and rectified in the wall editor.
+// on the room photo, and rectified in the wall editor. Each WebGL context (editor, projector window) has its own pipe.
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -13,7 +13,7 @@ import { PALETTES, rgb, LineBatch, lineMaterial, fillMaterial, luckyMaterial, sc
 const FSQ_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 
 const OUT_FS = `
-uniform sampler2D uGame; uniform vec2 uJ; uniform float uMode; uniform float uBright; uniform float uGrid;
+uniform sampler2D uGame; uniform vec2 uJ; uniform float uMode; uniform float uBright; uniform float uGrid; uniform float uWork;
 uniform mat3 uHJW; uniform float uSJW; uniform vec2 uCal; uniform vec2 uC[4];
 varying vec2 vUv;
 float band(float d, float w){ return 1.0 - smoothstep(w * 0.5, w * 0.5 + 1.0, d); }
@@ -22,6 +22,8 @@ void main(){
   vec2 j = vec2(vUv.x * uJ.x, (1.0 - vUv.y) * uJ.y);
   vec3 g = max(texture2D(uGame, vUv).rgb, 0.0);
   vec3 c = pow(1.0 - exp(-g * 1.35), vec3(1.0 / 2.2));
+  if (uMode > 1.5) c *= 0.55;
+  c = 1.0 - (1.0 - c) * (1.0 - uWork);
   if (uMode > 0.5 && uMode < 1.5) {
     vec2 m = mod(j, 80.0);
     float grid = max(band(min(m.x, 80.0 - m.x), 1.5), band(min(m.y, 80.0 - m.y), 1.5));
@@ -37,7 +39,6 @@ void main(){
     if (j.x > uJ.x - s && j.y > uJ.y - s) c = cornerColor(2);
     if (j.x < s && j.y > uJ.y - s) c = cornerColor(3);
   } else if (uMode > 1.5) {
-    c *= 0.55;
     vec3 h = uHJW * vec3(j, 1.0);
     float ok = step(0.0, h.z * uSJW);
     vec2 w = h.xy / (abs(h.z) < 1e-9 ? 1e-9 : h.z);
@@ -70,7 +71,7 @@ uniform sampler2D uPhoto; uniform vec2 uPhotoSize; uniform float uHasPhoto;
 uniform sampler2D uProj; uniform vec2 uJ;
 uniform mat3 uHPJ; uniform float uSPJ;
 uniform vec4 uFB; uniform vec3 uBg;
-uniform float uAmbient; uniform float uGain; uniform float uBlack;
+uniform float uAmbient; uniform float uGain; uniform float uBlack; uniform float uDirect;
 void main(){
   vec2 px = vec2(uFB.x * gl_FragCoord.x + uFB.y, uFB.z * gl_FragCoord.y + uFB.w);
   vec2 pu = vec2(px.x / uPhotoSize.x, 1.0 - px.y / uPhotoSize.y);
@@ -81,6 +82,10 @@ void main(){
   vec2 j = h.xy / (abs(h.z) < 1e-9 ? 1e-9 : h.z);
   vec2 ju = vec2(j.x / uJ.x, 1.0 - j.y / uJ.y);
   float inJ = ok * step(0.0, ju.x) * step(ju.x, 1.0) * step(0.0, ju.y) * step(ju.y, 1.0);
+  if (uDirect > 0.5) {
+    gl_FragColor = vec4(mix(uBg, texture2D(uProj, clamp(ju, 0.0, 1.0)).rgb, inJ), 1.0);
+    return;
+  }
   vec3 L = pow(texture2D(uProj, clamp(ju, 0.0, 1.0)).rgb, vec3(2.2)) * inJ;
   vec3 lit = alb * (uAmbient + L * uGain + inJ * uBlack) + L * 0.035;
   vec3 c = pow(max(lit, 0.0), vec3(1.0 / 2.2));
@@ -149,10 +154,7 @@ export function shapeQuad(s) {
 export class Renderer {
   constructor(canvas) {
     THREE.ColorManagement.enabled = false;
-    const gl = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
-    gl.outputColorSpace = THREE.LinearSRGBColorSpace;
-    gl.autoClear = false;
-    gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    const gl = this.makeGL(canvas, Math.min(window.devicePixelRatio || 1, 1.5));
     this.gl = gl;
     this.jw = 1280;
     this.jh = 720;
@@ -188,14 +190,7 @@ export class Renderer {
     this.blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
     this.blank.needsUpdate = true;
 
-    this.composer = new EffectComposer(gl, new THREE.WebGLRenderTarget(this.jw, this.jh, { type: THREE.HalfFloatType, depthBuffer: false }));
-    this.composer.renderToScreen = false;
-    this.composer.setPixelRatio(1);
-    this.composer.addPass(new RenderPass(this.game, this.camera, null, new THREE.Color(0, 0, 0), 1));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(this.jw, this.jh), 0.85, 0, 0.22);
-    this.bloom.compositeMaterial.uniforms.bloomFactors.value = [1.0, 0.72, 0.32, 0.08, 0.015];
-    this.composer.addPass(this.bloom);
-    this.composer.setSize(this.jw, this.jh);
+    this.main = this.makePipe(gl);
 
     this.rtJ = new THREE.WebGLRenderTarget(this.jw, this.jh, {
       depthBuffer: false, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: true,
@@ -204,7 +199,7 @@ export class Renderer {
 
     const J = () => new THREE.Vector2(this.jw, this.jh);
     this.outMat = fsMaterial(OUT_FS, {
-      uGame: { value: null }, uJ: { value: J() }, uMode: { value: 0 }, uBright: { value: 1 }, uGrid: { value: 1 },
+      uGame: { value: null }, uJ: { value: J() }, uMode: { value: 0 }, uBright: { value: 1 }, uGrid: { value: 1 }, uWork: { value: 0 },
       uHJW: { value: new THREE.Matrix3() }, uSJW: { value: 1 }, uCal: { value: new THREE.Vector2(100, 70) },
       uC: { value: [new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2()] },
     });
@@ -213,7 +208,7 @@ export class Renderer {
       uProj: { value: this.rtJ.texture }, uJ: { value: J() },
       uHPJ: { value: new THREE.Matrix3() }, uSPJ: { value: 1 },
       uFB: { value: new THREE.Vector4() }, uBg: { value: this.bg },
-      uAmbient: { value: 0.36 }, uGain: { value: 1.15 }, uBlack: { value: 0.025 },
+      uAmbient: { value: 0.36 }, uGain: { value: 1.15 }, uBlack: { value: 0.025 }, uDirect: { value: 0 },
     });
     this.editMat = fsMaterial(EDIT_FS, {
       uPhoto: { value: this.blank }, uPhotoSize: { value: new THREE.Vector2(1, 1) }, uHasPhoto: { value: 0 },
@@ -229,8 +224,32 @@ export class Renderer {
     this.insetScene = fsScene(this.insetMat);
   }
 
+  makeGL(canvas, ratio) {
+    const gl = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
+    gl.outputColorSpace = THREE.LinearSRGBColorSpace;
+    gl.autoClear = false;
+    gl.setPixelRatio(ratio);
+    return gl;
+  }
+
+  makePipe(gl) {
+    const composer = new EffectComposer(gl, new THREE.WebGLRenderTarget(this.jw, this.jh, { type: THREE.HalfFloatType, depthBuffer: false }));
+    composer.renderToScreen = false;
+    composer.setPixelRatio(1);
+    composer.addPass(new RenderPass(this.game, this.camera, null, new THREE.Color(0, 0, 0), 1));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(this.jw, this.jh), 0.85, 0, 0.22);
+    bloom.compositeMaterial.uniforms.bloomFactors.value = [1.0, 0.72, 0.32, 0.08, 0.015];
+    composer.addPass(bloom);
+    composer.setSize(this.jw, this.jh);
+    return { gl, composer, bloom, w: this.jw, h: this.jh };
+  }
+
   resize(w, h) {
     this.gl.setSize(Math.max(1, w), Math.max(1, h), false);
+  }
+
+  setDirect(on) {
+    this.roomMat.uniforms.uDirect.value = on ? 1 : 0;
   }
 
   setPhoto(img) {
@@ -259,7 +278,6 @@ export class Renderer {
     if (jw === this.jw && jh === this.jh) return;
     this.jw = jw;
     this.jh = jh;
-    this.composer.setSize(jw, jh);
     this.rtJ.setSize(jw, jh);
     for (const m of [this.outMat, this.roomMat, this.editMat]) m.uniforms.uJ.value.set(jw, jh);
   }
@@ -402,26 +420,47 @@ export class Renderer {
     l.mesh.position.y = bump;
   }
 
-  render(views, o) {
-    const gl = this.gl;
+  prepare(o) {
     for (const m of this.timed) m.uniforms.uTime.value = o.time;
     this.dynLines.begin();
     this.figLines.begin();
     if (o.draw) o.draw(this.dynLines, this.particles, this.pal, this.figLines);
     this.dynLines.end();
     this.figLines.end();
-    this.composer.render(0);
-    gl.setRenderTarget(this.composer.readBuffer);
+  }
+
+  renderJ(pipe, o, target) {
+    const gl = pipe.gl;
+    if (pipe.w !== this.jw || pipe.h !== this.jh) {
+      pipe.composer.setSize(this.jw, this.jh);
+      pipe.w = this.jw;
+      pipe.h = this.jh;
+    }
+    this.dynLines.touch();
+    this.figLines.touch();
+    this.particles.touch();
+    pipe.composer.render(0);
+    gl.setRenderTarget(pipe.composer.readBuffer);
     if (this.figLines.n) gl.render(this.figScene, this.camera);
     if (this.maskScene.children.length) gl.render(this.maskScene, this.camera);
     const u = this.outMat.uniforms;
-    u.uGame.value = this.composer.readBuffer.texture;
+    u.uGame.value = pipe.composer.readBuffer.texture;
     u.uMode.value = o.mode || 0;
     u.uBright.value = o.bright ?? 1;
     u.uGrid.value = o.calibGrid ? 1 : 0;
-    gl.setRenderTarget(this.rtJ);
+    u.uWork.value = o.work || 0;
+    gl.setRenderTarget(target);
     gl.render(this.outScene, this.fsCam);
+  }
+
+  renderMain(views, o) {
+    this.renderJ(this.main, o, this.rtJ);
     this.drawPanes(views, o);
+  }
+
+  render(views, o) {
+    this.prepare(o);
+    this.renderMain(views, o);
   }
 
   drawPanes(views, o) {

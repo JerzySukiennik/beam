@@ -28,6 +28,7 @@ const ICONS = {
   redo: '<path d="M13 4.5L16.5 8 13 11.5"/><path d="M16 8H8.5a4.5 4.5 0 0 0 0 9H11"/>',
   fit: '<path d="M3 7.5V3h4.5M12.5 3H17v4.5M17 12.5V17h-4.5M7.5 17H3v-4.5"/>',
   full: '<path d="M8 3H3v5M12 3h5v5M17 12v5h-5M3 12v5h5"/>',
+  projector: '<rect x="2.5" y="7" width="10.5" height="7" rx="1.6"/><circle cx="7.6" cy="10.5" r="1.9"/><path d="M13 9.2l4.5-2.4v7.4L13 11.8" stroke-linejoin="round"/>',
 };
 
 const icon = name => `<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6">${ICONS[name]}</svg>`;
@@ -101,7 +102,13 @@ export class UI {
     const demo = app.walls.get(st.wallId)?.demo ? h('button', { class: 'btn ghost', title: 'Wczytaj gotowe mapowanie tej ściany (da się cofnąć)', onclick: () => app.loadDemo() }, 'Demo') : null;
     const undo = h('button', { class: 'icon', title: 'Cofnij (Cmd+Z)', html: icon('undo'), onclick: () => app.scene.undo(), disabled: !app.scene.undoStack.length });
     const redo = h('button', { class: 'icon', title: 'Ponów (Shift+Cmd+Z)', html: icon('redo'), onclick: () => app.scene.redo(), disabled: !app.scene.redoStack.length });
-    this.el.topRight.replaceChildren(...[h('label', { class: 'mini' }, 'Paleta', pal), mode, demo, h('span', { class: 'sep' }), undo, redo].filter(Boolean));
+    const pr = app.projector;
+    const proj = app.live || pr.attached ? h('button', {
+      class: 'btn ghost pbtn' + (pr.attached ? ' on' : ''),
+      title: pr.attached ? 'Okno projektora jest połączone. Klik: pokaż je.' : 'Otwórz okno projektora na drugim ekranie',
+      onclick: () => (pr.attached ? pr.focus() : pr.open()),
+    }, h('i', { class: 'pdot' }), 'Projektor') : null;
+    this.el.topRight.replaceChildren(...[proj, h('label', { class: 'mini' }, 'Paleta', pal), mode, demo, h('span', { class: 'sep' }), undo, redo].filter(Boolean));
   }
 
   renderToolbar() {
@@ -168,10 +175,33 @@ export class UI {
     this.hint(this.tools.hint());
   }
 
+  workSlider() {
+    return [
+      this.slider('Światło robocze', this.st.settings.work || 0, 0, 0.6, 0.01, (s, v) => { s.settings.work = v; }, v => (v ? Math.round(v * 100) + '%' : 'wyłączone')),
+      h('p', { class: 'fine' }, 'Szare światło w krokach 2 do 4, żeby po ciemku widzieć ścianę i rzeczy na niej. W grze znika.'),
+    ];
+  }
+
   panelWall() {
     const app = this.app, st = this.st;
+    const lives = app.walls.list.filter(w => w.kind === 'live');
+    const list = h('div', { class: 'lwalls' }, ...lives.map(w => h('button', { class: 'lw' + (w.id === st.wallId ? ' on' : ''), onclick: () => app.selectWall(w.id) },
+      h('i', { class: 'pico', html: icon('projector') }),
+      h('span', {}, w.name),
+      h('i', { class: 'x', title: 'Usuń tę ścianę razem z mapowaniem', onclick: e => { e.stopPropagation(); app.removeWall(w.id); } }, '×'))));
+    const cur = app.walls.get(st.wallId);
+    const rename = app.live && cur ? h('label', { class: 'field' }, h('span', {}, 'Nazwa ściany'), h('input', {
+      type: 'text', value: cur.name, maxlength: 30,
+      onchange: e => app.renameWall(cur.id, e.target.value),
+    })) : null;
+    const liveCard = this.card('1. Prawdziwa ściana',
+      h('p', {}, 'Masz projektor? Podłącz go przez HDMI, a gra pojawi się prosto na ścianie. Kalibrujesz na kartce A4 i mapujesz to, co widzisz.'),
+      lives.length ? list : null,
+      rename,
+      h('button', { class: 'btn wide ibtn', onclick: () => app.newLiveWall() }, h('i', { html: icon('projector') }), lives.length ? 'Nowa prawdziwa ściana' : 'Zacznij na prawdziwej ścianie'));
     const grid = h('div', { class: 'walls' });
     for (const w of app.walls.list) {
+      if (w.kind === 'live') continue;
       const img = h('img', { alt: '', src: w.builtin ? w.src : null, loading: 'lazy' });
       if (!w.builtin) app.walls.thumb(w).then(src => { img.src = src; }).catch(() => { });
       const card = h('button', { class: 'wall' + (w.id === st.wallId ? ' on' : ''), onclick: () => app.selectWall(w.id) }, img, h('span', {}, w.name));
@@ -181,23 +211,73 @@ export class UI {
     const file = h('input', { type: 'file', accept: 'image/*', hidden: true, onchange: e => { const f = e.target.files[0]; if (f) app.uploadWall(f); e.target.value = ''; } });
     const wall = app.walls.get(st.wallId);
     const credit = wall && wall.credit ? h('p', { class: 'fine' }, 'Zdjęcie: ', h('a', { href: wall.credit.url, target: '_blank', rel: 'noopener' }, wall.credit.author), ` (${wall.credit.license})`) : null;
+    const photoCard = this.card('Albo symulacja na zdjęciu',
+      h('p', {}, 'Wybierz zdjęcie ściany. Beam udaje na nim światło projektora, więc grę zaprojektujesz bez sprzętu.'),
+      grid,
+      h('button', { class: 'btn wide', onclick: () => file.click() }, 'Wgraj zdjęcie swojej ściany'),
+      file,
+      h('p', { class: 'fine' }, 'Najlepiej z miejsca, gdzie stanie projektor, na wprost i bez lampy błyskowej.'),
+      credit);
     return [
-      this.card('1. Ściana',
-        h('p', {}, 'Wybierz zdjęcie ściany. Beam udaje na nim światło projektora, więc grę zaprojektujesz bez sprzętu.'),
-        grid,
-        h('button', { class: 'btn wide', onclick: () => file.click() }, 'Wgraj zdjęcie swojej ściany'),
-        file,
-        h('p', { class: 'fine' }, 'Najlepiej z miejsca, gdzie stanie projektor, na wprost i bez lampy błyskowej.'),
-        credit),
-      this.card('Pokój',
+      liveCard,
+      photoCard,
+      app.live ? null : this.card('Pokój',
         this.slider('Światło w pokoju', st.settings.ambient, 0.05, 1, 0.01, (s, v) => { s.settings.ambient = v; }, v => Math.round(v * 100) + '%'),
         h('p', { class: 'fine' }, 'Im ciemniej, tym mocniej świeci neon. Projektor najlepiej wygląda przy zgaszonym świetle.')),
       this.card(null, h('button', { class: 'btn primary wide', onclick: () => app.setStep(2) }, 'Dalej: projektor')),
     ];
   }
 
+  panelLive() {
+    const app = this.app, st = this.st, pr = app.projector;
+    const cur = `${st.proj.jw}x${st.proj.jh}`, nat = pr.native ? pr.native.join('x') : null;
+    const sizes = ['854x480', '1280x720', '1920x1080'];
+    for (const s of [nat, cur]) if (s && !sizes.includes(s)) sizes.push(s);
+    const res = h('select', { class: 'sel', onchange: e => app.setResolution(e.target.value) },
+      ...sizes.map(r => h('option', { value: r, selected: cur === r }, r.replace('x', '×') + (r === nat ? ' (ekran projektora)' : ''))));
+    const full = pr.isFull();
+    const status = pr.attached
+      ? (full ? 'Połączony, pełny ekran na projektorze.' : 'Połączony. Kliknij w obraz na ścianie, żeby włączyć pełny ekran.')
+      : pr.isOpen ? 'Okno otwarte, łączę...' : 'Okno projektora jest zamknięte.';
+    let action;
+    if (pr.attached) {
+      action = h('div', { class: 'row' },
+        pr.canPlace() ? h('button', { class: 'btn', onclick: () => { pr.place(); pr.focus(); } }, 'Przenieś na projektor') : null,
+        h('button', { class: 'btn ghost', onclick: () => pr.close() }, 'Zamknij okno'));
+    } else if (pr.perm === 'prompt' && !pr.single && !pr.isOpen) {
+      action = h('div', { class: 'col' },
+        h('button', { class: 'btn primary wide', onclick: () => pr.allow() }, 'Pozwól przenieść okno na projektor'),
+        h('button', { class: 'btn ghost wide', onclick: () => pr.open() }, 'Otwórz bez tego, przeciągnę sam'));
+    } else {
+      action = h('button', { class: 'btn primary wide', onclick: () => pr.open() }, pr.isOpen ? 'Pokaż okno projektora' : 'Otwórz okno projektora');
+    }
+    const how = pr.perm === 'granted'
+      ? 'Okno samo otworzy się na ekranie projektora.'
+      : pr.perm === 'prompt'
+        ? 'Chrome zapyta o okna na wszystkich ekranach. Zgoda wystarczy raz, potem okno samo trafia na projektor.'
+        : 'Ta przeglądarka nie przenosi okien sama: przeciągnij okno na ekran projektora.';
+    return [
+      this.card('2. Projektor',
+        h('ol', { class: 'steps' },
+          h('li', {}, 'Podłącz projektor przez HDMI. W Ustawieniach systemowych, w Wyświetlaczach, ustaw go jako rozszerzony ekran, nie lustrzany.'),
+          h('li', {}, 'Otwórz okno projektora. ' + how),
+          h('li', {}, 'Kliknij w obraz na ścianie: włączy się pełny ekran. Klawisz F przełącza.')),
+        h('div', { class: 'pstat' + (pr.attached ? ' on' : '') }, h('i', { class: 'pdot' }), h('span', {}, status)),
+        pr.single ? h('p', { class: 'warn' }, 'Widzę tylko jeden ekran. Sprawdź kabel HDMI i czy projektor nie jest ustawiony jako lustrzany.') : null,
+        action),
+      this.card('Obraz',
+        this.toggle('Obraz testowy', app.testPattern, v => { app.testPattern = v; app.invalidate(); this.renderPanel(); }, 'Siatka, ramka i kolorowe rogi: widać, czy obraz łapie całą ścianę'),
+        h('label', { class: 'field' }, h('span', {}, 'Rozdzielczość'), res),
+        this.toggle('Odbij w poziomie', pr.flipX, v => pr.setFlip(v, pr.flipY), 'Gdy projektor świeci zza ekranu'),
+        this.toggle('Odbij w pionie', pr.flipY, v => pr.setFlip(pr.flipX, v), 'Projektor do góry nogami pod sufitem: włącz oba'),
+        ...this.workSlider()),
+      this.card(null, h('button', { class: 'btn primary wide', onclick: () => app.setStep(3) }, 'Dalej: kalibracja')),
+    ];
+  }
+
   panelProj() {
     const app = this.app, st = this.st;
+    if (app.live) return this.panelLive();
     const res = h('select', { class: 'sel', onchange: e => app.setResolution(e.target.value) },
       ...['854x480', '1280x720', '1920x1080'].map(r => h('option', { value: r, selected: `${st.proj.jw}x${st.proj.jh}` === r }, r.replace('x', '×'))));
     return [
@@ -213,7 +293,9 @@ export class UI {
         h('label', { class: 'field' }, h('span', {}, 'Rozdzielczość'), res),
         this.toggle('Obraz testowy', app.testPattern, v => { app.testPattern = v; app.invalidate(); this.renderPanel(); }, 'Siatka, ramka i kolorowe rogi, jak w menu projektora'),
         this.toggle('Podgląd HDMI w rogu', st.settings.inset, v => this.set('inset', v))),
-      this.card(null, h('button', { class: 'btn primary wide', onclick: () => app.setStep(3) }, 'Dalej: kalibracja')),
+      this.card(null,
+        h('button', { class: 'btn primary wide', onclick: () => app.setStep(3) }, 'Dalej: kalibracja'),
+        h('p', { class: 'fine' }, 'Masz prawdziwy projektor? W kroku 1 wybierz Prawdziwa ściana.')),
     ];
   }
 
@@ -223,17 +305,28 @@ export class UI {
       type: 'number', min: 1, max: 1000, step: 0.1, value: st.calibCm[key],
       onchange: e => { const v = Math.max(1, Math.min(1000, +e.target.value || 1)); e.target.value = v; this.quiet(() => app.scene.commit('calib', s => { s.calibCm[key] = v; s.calibrated = true; })); },
     }), h('i', {}, 'cm'));
-    const presets = [['A4', 21, 29.7], ['A3', 29.7, 42], ['30×40', 30, 40], ['50×70', 50, 70], ['70×100', 70, 100]];
+    const presets = app.live
+      ? [['A4 pion', 21, 29.7], ['A4 poziom', 29.7, 21], ['A3', 29.7, 42], ['30×40', 30, 40], ['50×70', 50, 70]]
+      : [['A4', 21, 29.7], ['A3', 29.7, 42], ['30×40', 30, 40], ['50×70', 50, 70], ['70×100', 70, 100]];
+    const steps = app.live
+      ? [
+        h('li', {}, 'Przyklej na ścianę kartkę A4 albo weź ramę, plakat: coś prostokątnego o znanym wymiarze.'),
+        h('li', {}, 'Przeciągnij 4 kolorowe krzyżyki na jej rogi: myszką prosto na ścianie albo tutaj w podglądzie. Niebieski to lewy górny, zielony lewy dolny.'),
+        h('li', {}, 'Wpisz prawdziwe wymiary w centymetrach.')]
+      : [
+        h('li', {}, 'Wybierz na ścianie coś prostokątnego: ramę, plakat, kartkę A4.'),
+        h('li', {}, 'Przeciągnij 4 kolorowe krzyżyki na jego rogi. Niebieski to lewy górny, zielony lewy dolny.'),
+        h('li', {}, 'Wpisz prawdziwe wymiary w centymetrach.')];
     return [
       this.card('3. Kalibracja',
-        h('ol', { class: 'steps' },
-          h('li', {}, 'Wybierz na ścianie coś prostokątnego: ramę, plakat, kartkę A4.'),
-          h('li', {}, 'Przeciągnij 4 kolorowe krzyżyki na jego rogi. Niebieski to lewy górny, zielony lewy dolny.'),
-          h('li', {}, 'Wpisz prawdziwe wymiary w centymetrach.')),
+        h('ol', { class: 'steps' }, ...steps),
         h('div', { class: 'row' }, num('w', 'Szerokość'), num('h', 'Wysokość')),
         h('div', { class: 'row wrap' }, ...presets.map(([l, w, hh]) => h('button', { class: 'btn small', onclick: () => app.scene.commit('calib', s => { s.calibCm = { w, h: hh }; s.calibrated = true; }) }, l))),
         this.toggle('Siatka 10 cm na ścianie', st.settings.calibGrid, v => this.set('calibGrid', v)),
-        h('p', { class: 'fine' }, 'Strzałki przesuwają zaznaczony krzyżyk o 1 piksel projektora, Shift o 10. Tab przełącza krzyżyk.')),
+        h('p', { class: 'fine' }, app.live
+          ? 'Strzałki przesuwają zaznaczony krzyżyk o 1 piksel projektora, Shift o 10. Tab przełącza krzyżyk. Siatka na ścianie ma kwadraty po 10 cm: zmierz linijką, czy się zgadza.'
+          : 'Strzałki przesuwają zaznaczony krzyżyk o 1 piksel projektora, Shift o 10. Tab przełącza krzyżyk.')),
+      app.live ? this.card('Na ścianie', ...this.workSlider()) : null,
       this.card('Po co to',
         h('p', {}, 'Po kalibracji pion jest pionem, a centymetr w edytorze to centymetr na ścianie. Jak ktoś trąci projektor, wystarczy znowu ustawić krzyżyki na tej samej ramie i wszystko wraca na miejsce.')),
       this.card(null, h('button', { class: 'btn primary wide', onclick: () => app.setStep(4) }, 'Gotowe, mapuj')),
@@ -280,7 +373,12 @@ export class UI {
       'data-id': s.id,
       onclick: e => { if (e.shiftKey) { t.sel.has(s.id) ? t.sel.delete(s.id) : t.sel.add(s.id); } else t.sel = new Set([s.id]); t.selChanged(); },
     }, h('i', { class: 'dot' + (s.type === 'mask' ? ' mask' : ''), style: s.type === 'mask' ? null : `--c:${pal[s.type]}` }), h('span', {}, s.name || TYPES[s.type].label), h('em', {}, TYPES[s.type].label))));
-    kids.push(this.card(`Kształty (${st.shapes.length})`, st.shapes.length ? list : h('p', { class: 'fine' }, 'Pusto. Weź Narożniki (Q) i kliknij 4 rogi ramy na zdjęciu.')));
+    const others = app.walls.list.filter(w => w.id !== st.wallId);
+    const copy = h('select', { class: 'sel', title: 'Kształty są w cm względem prostokąta kalibracji, więc trafiają w rzeczy, jeśli obie ściany kalibrowano na tym samym przedmiocie', onchange: e => { const id = e.target.value; e.target.value = ''; if (id) app.copyShapes(id); } },
+      h('option', { value: '' }, 'Skopiuj kształty z innej ściany...'), ...others.map(w => h('option', { value: w.id }, w.name)));
+    const empty = app.live ? 'Pusto. Weź Narożniki (Q) i kliknij 4 rogi ramy, myszką prosto na ścianie.' : 'Pusto. Weź Narożniki (Q) i kliknij 4 rogi ramy na zdjęciu.';
+    kids.push(this.card(`Kształty (${st.shapes.length})`, st.shapes.length ? list : h('p', { class: 'fine' }, empty), others.length ? copy : null));
+    if (app.live) kids.push(this.card('Na ścianie', ...this.workSlider()));
     kids.push(this.card('Przyciąganie',
       this.toggle('Do punktów innych kształtów', t.snapPts, v => { t.snapPts = v; }),
       this.toggle('Do siatki 0,5 cm (w widoku ściany)', t.snapGrid, v => { t.snapGrid = v; }),
@@ -350,7 +448,8 @@ export class UI {
     return [
       this.card('5. Gra',
         h('button', { class: 'btn primary wide big', onclick: () => app.restart() }, 'Od nowa (R)'),
-        this.stats),
+        this.stats,
+        app.projector.attached ? h('p', { class: 'fine' }, 'Gra leci na projektorze. Klawiatura działa w obu oknach.') : null),
       this.card('Ruch',
         this.seg([['precise', 'Precyzyjny'], ['rubbery', 'Gumowy']], st.settings.mode, v => this.set('mode', v)),
         h('p', { class: 'fine' }, st.settings.mode === 'rubbery' ? 'Jak Human Fall Flat: chwiejny ludzik na sprężynach. Shift podnosi ręce i łapie krawędzie, puść, żeby skoczyć.' : 'Jak Mario: ostre sterowanie, skok zależy od tego, jak długo trzymasz.')),
@@ -385,30 +484,35 @@ export class UI {
     const app = this.app;
     const on = app.step === 5 && app.game.running;
     this.el.hud.classList.toggle('on', on);
-    if (!on) return;
+    if (!on) {
+      if (this.hudSig !== '') { this.hudSig = ''; app.projector.hud(null); }
+      return;
+    }
     const d = app.game.hud();
-    const pw = [];
+    const parts = [{ cls: 'coin', text: `● ${d.coins}` }];
+    if (d.total) parts.push({ text: `zostało ${d.left}` });
+    parts.push({ cls: 'time', text: fmtTime(d.time) });
     d.powers.forEach((p, i) => {
-      if (p.big > 0) pw.push(h('i', { class: 'pw big' }, `P${i + 1} duży ${Math.ceil(p.big)}`));
-      if (p.feather > 0) pw.push(h('i', { class: 'pw feather' }, `P${i + 1} piórko ${Math.ceil(p.feather)}`));
-      if (p.star > 0) pw.push(h('i', { class: 'pw star' }, `P${i + 1} gwiazda ${Math.ceil(p.star)}`));
+      if (p.big > 0) parts.push({ cls: 'pw big', text: `P${i + 1} duży ${Math.ceil(p.big)}` });
+      if (p.feather > 0) parts.push({ cls: 'pw feather', text: `P${i + 1} piórko ${Math.ceil(p.feather)}` });
+      if (p.star > 0) parts.push({ cls: 'pw star', text: `P${i + 1} gwiazda ${Math.ceil(p.star)}` });
     });
-    const sig = `${d.coins}|${d.left}|${d.time.toFixed(1)}|${pw.map(x => x.textContent).join()}`;
+    const sig = parts.map(p => p.text).join('|');
     if (sig === this.hudSig) return;
     this.hudSig = sig;
-    this.el.hud.replaceChildren(...[
-      h('span', { class: 'coin' }, '● ', d.coins),
-      d.total ? h('span', {}, `zostało ${d.left}`) : null,
-      h('span', { class: 'time' }, fmtTime(d.time)),
-      ...pw].filter(Boolean));
+    this.el.hud.replaceChildren(...parts.map(p => h(p.cls && p.cls.startsWith('pw') ? 'i' : 'span', { class: p.cls }, p.text)));
+    app.projector.hud(parts);
     if (this.stats && Math.random() < 0.2) this.updateStats(d);
   }
 
   gameEvent(type, data) {
+    const pr = this.app.projector;
     if (type === 'finish') {
       const parts = [`Czas ${fmtTime(data.time)}`];
       if (data.total) parts.push(`monety ${data.coins}${data.left === 0 ? ', wszystkie!' : ''}`);
-      this.toast(h('div', {}, h('b', {}, data.left === 0 && data.total ? 'Perfekcyjnie!' : 'Meta!'), h('span', {}, parts.join(' · ')), h('button', { class: 'btn primary small', onclick: () => this.app.restart() }, 'Jeszcze raz (R)')), 0);
+      const title = data.left === 0 && data.total ? 'Perfekcyjnie!' : 'Meta!';
+      this.toast(h('div', {}, h('b', {}, title), h('span', {}, parts.join(' · ')), h('button', { class: 'btn primary small', onclick: () => this.app.restart() }, 'Jeszcze raz (R)')), 0);
+      pr.message(title, parts.join(' · ') + ' · R: jeszcze raz');
       this.updateStats(data);
     } else if (type === 'power') {
       const names = { mushroom: 'Grzybek: rośniesz', feather: 'Piórko: podwójny skok i szybowanie', star: 'Gwiazda: lawa nie parzy' };

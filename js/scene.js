@@ -31,6 +31,7 @@ export function defaultSettings() {
     inset: true,
     charSize: 8,
     players: 1,
+    work: 0.2,
   };
 }
 
@@ -106,6 +107,11 @@ export class Scene {
     this.undoStack.push(before);
     if (this.undoStack.length > 150) this.undoStack.shift();
     this.redoStack.length = 0;
+    this.emit(kind);
+  }
+
+  apply(kind, fn) {
+    fn(this.state);
     this.emit(kind);
   }
 

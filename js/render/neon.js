@@ -174,14 +174,17 @@ export class LineBatch {
   }
 
   end() {
-    const n = this.n;
+    this.touch();
+    for (const name of ['aA', 'aB', 'aColor', 'aParams']) this.geo.getAttribute(name).needsUpdate = true;
+    this.geo.setDrawRange(0, this.n * 6);
+  }
+
+  touch() {
     for (const name of ['aA', 'aB', 'aColor', 'aParams']) {
       const at = this.geo.getAttribute(name);
       at.clearUpdateRanges();
-      at.addUpdateRange(0, n * 4 * at.itemSize);
-      at.needsUpdate = true;
+      at.addUpdateRange(0, this.n * 4 * at.itemSize);
     }
-    this.geo.setDrawRange(0, n * 6);
   }
 }
 
@@ -489,13 +492,17 @@ export class Particles {
       this.outCol[i * 3] = this.col[i * 3] * a; this.outCol[i * 3 + 1] = this.col[i * 3 + 1] * a; this.outCol[i * 3 + 2] = this.col[i * 3 + 2] * a;
       this.outSize[i] = this.size[i] * (0.4 + 0.6 * f);
     }
+    this.touch();
+    for (const name of ['position', 'aColor', 'aSize']) this.geo.getAttribute(name).needsUpdate = true;
+    this.geo.setDrawRange(0, w);
+  }
+
+  touch() {
     for (const name of ['position', 'aColor', 'aSize']) {
       const at = this.geo.getAttribute(name);
       at.clearUpdateRanges();
-      at.addUpdateRange(0, w * at.itemSize);
-      at.needsUpdate = true;
+      at.addUpdateRange(0, this.n * at.itemSize);
     }
-    this.geo.setDrawRange(0, w);
   }
 
   clear() { this.n = 0; this.geo.setDrawRange(0, 0); }

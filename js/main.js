@@ -1,16 +1,18 @@
-// Beam: app wiring. Scene, spaces, views, renderer, game, editor tools and UI, on-demand rendering, keys, walls and steps.
+// Beam: app wiring. Scene, spaces, views, renderer, projector window, game, editor tools and UI, on-demand rendering,
+// keys, walls and steps.
 
 import * as H from './math/homography.js';
-import { Scene, blankState } from './scene.js';
+import { Scene, blankState, clone, newId } from './scene.js';
 import { Space } from './space.js';
 import { Views } from './views.js';
 import { Renderer } from './render/renderer.js';
+import { Projector } from './projector.js';
 import { Game } from './game/game.js';
 import { Input, GAME_KEYS } from './game/input.js';
 import { initRapier } from './game/physics.js';
 import { Tools } from './editor/tools.js';
 import { UI } from './editor/ui.js';
-import { Walls, demoState, presetQuad, loadImage } from './walls.js';
+import { Walls, demoState, liveState, liveQuad, presetQuad, loadImage } from './walls.js';
 
 const LAST = 'beam.v1.last';
 const LAYOUTS = { 1: 'room', 2: 'room', 3: 'split', 4: 'split', 5: 'room' };
@@ -22,11 +24,15 @@ class App {
     this.overlay = document.getElementById('overlay');
     this.step = 1;
     this.ready = false;
+    this.live = false;
     this.testPattern = false;
     this.time = 1.7;
     this.last = 0;
     this.raf = 0;
+    this.rafGuard = 0;
+    this.tick = 0;
     this.glDirty = true;
+    this.projDirty = true;
     this.paneDirty = false;
     this.ovDirty = true;
     this.staticTimer = 0;
@@ -42,6 +48,7 @@ class App {
     this.input = new Input();
     this.renderer = new Renderer(this.glCanvas);
     this.renderer.onAsync = () => { this.renderer.rebuild(this.scene.state); this.invalidate(); };
+    this.projector = new Projector(this);
     this.ui = new UI(this);
     this.tools = new Tools(this);
     this.game = new Game(this);
@@ -50,7 +57,8 @@ class App {
     window.addEventListener('keydown', e => this.onKey(e));
     window.addEventListener('keyup', e => this.onKey(e));
     window.addEventListener('blur', () => this.input.clear());
-    window.addEventListener('pagehide', () => this.scene.flush());
+    window.addEventListener('pagehide', () => { this.scene.flush(); this.projector.release(); });
+    document.addEventListener('visibilitychange', () => this.requestFrame());
   }
 
   async boot() {
@@ -76,7 +84,7 @@ class App {
     this.tools.resize(w, h);
     this.glDirty = true;
     this.ovDirty = true;
-    this.frame(performance.now());
+    this.frame();
   }
 
   onScene(kind, live) {
@@ -86,6 +94,13 @@ class App {
       this.renderer.setSpace(this.space, st);
       const aspect = st.proj.jw / st.proj.jh;
       if (aspect !== this.views.projAspect) { this.views.projAspect = aspect; this.views.arrange(); }
+      if (kind !== 'calib') {
+        this.projector.layout();
+        if (this.live && (this.photoSize[0] !== st.proj.jw || this.photoSize[1] !== st.proj.jh)) {
+          this.photoSize = [st.proj.jw, st.proj.jh];
+          this.fitViews(false);
+        }
+      }
     }
     if (kind === 'all' || kind === 'shapes' || st.settings.palette !== this.palNow) {
       this.palNow = st.settings.palette;
@@ -123,19 +138,38 @@ class App {
     if (!wall) return;
     const token = ++this.wallToken;
     this.scene.flush();
+    const live = wall.kind === 'live';
     let img = null;
-    try { img = await this.walls.image(wall); } catch (e) { this.ui.toast('Nie udało się wczytać tego zdjęcia.', 3000); }
+    if (!live) {
+      try { img = await this.walls.image(wall); } catch (e) { this.ui.toast('Nie udało się wczytać tego zdjęcia.', 3000); }
+    }
     if (token !== this.wallToken) return;
-    this.photoSize = img ? [img.naturalWidth, img.naturalHeight] : wall.size || [1600, 1000];
+    const st = Scene.load(id) || (live ? liveState(wall, this.projector.native) : wall.demo ? demoState(wall) : blankState(wall));
+    this.live = live;
+    this.photoSize = live ? [st.proj.jw, st.proj.jh] : img ? [img.naturalWidth, img.naturalHeight] : wall.size || [1600, 1000];
     this.renderer.setPhoto(img);
-    const st = Scene.load(id) || (wall.demo ? demoState(wall) : blankState(wall));
+    this.renderer.setDirect(live);
     this.tools.sel.clear();
     this.tools.poly = null;
     this.tools.drag = null;
     this.ready = true;
     this.scene.replace(st);
+    this.syncResolution();
     this.fitViews(true);
     this.saveLast();
+  }
+
+  async newLiveWall() {
+    const n = this.walls.list.filter(w => w.kind === 'live').length;
+    const wall = this.walls.createLive(n ? `Prawdziwa ściana ${n + 1}` : 'Prawdziwa ściana');
+    await this.selectWall(wall.id);
+    this.setStep(2);
+    this.ui.toast('Teraz okno projektora: otwórz je i przenieś na ekran projektora.', 3600);
+  }
+
+  renameWall(id, name) {
+    this.walls.rename(id, name);
+    this.ui.render();
   }
 
   loadDemo() {
@@ -168,6 +202,26 @@ class App {
     this.ui.render();
   }
 
+  copyShapes(id) {
+    const wall = this.walls.get(id);
+    if (!wall) return;
+    const src = Scene.load(id) || (wall.demo ? demoState(wall) : null);
+    if (!src || !src.shapes.length) { this.ui.toast('Na tamtej ścianie nie ma jeszcze kształtów.', 2600); return; }
+    const shapes = src.shapes.map(s => ({ ...clone(s), id: newId('s') }));
+    const items = (src.items || []).map(i => ({ ...clone(i), id: newId('i') }));
+    const cm = this.scene.state.calibCm;
+    const same = Math.abs(src.calibCm.w - cm.w) < 0.05 && Math.abs(src.calibCm.h - cm.h) < 0.05;
+    this.tools.sel = new Set(shapes.map(s => s.id));
+    this.scene.commit('all', st => {
+      st.shapes.push(...shapes);
+      for (const it of items) {
+        if (it.type !== 'coin') st.items = st.items.filter(i => i.type !== it.type);
+        st.items.push(it);
+      }
+    });
+    this.ui.toast(`Skopiowane kształty: ${shapes.length}. ${same ? 'Trafią w rzeczy, jeśli kalibracja była na tym samym przedmiocie.' : `Tamta kalibracja miała ${+src.calibCm.w.toFixed(1)} × ${+src.calibCm.h.toFixed(1)} cm, więc kształty mogą nie trafić.`} Cmd+Z cofa.`, 5200);
+  }
+
   setStep(n) {
     if (n === this.step) return;
     this.step = n;
@@ -175,6 +229,7 @@ class App {
     this.tools.drag = null;
     this.input.clear();
     this.ui.hideToast();
+    this.projector.message(null);
     if (n === 5) this.restart();
     else if (this.game.running) { this.game.stop(); this.buildStatic(); }
     this.views.setLayout(this.layoutFor[n]);
@@ -189,6 +244,7 @@ class App {
     this.ui.hideToast();
     if (this.step !== 5) { this.setStep(5); return; }
     if (!this.space.ok) { this.ui.toast('Kalibracja jest krzywa. Popraw krzyżyki w kroku 3.', 3200); return; }
+    this.projector.message(null);
     this.buildStatic();
     this.game.start();
     this.playSig = this.playSignature();
@@ -200,6 +256,18 @@ class App {
 
   onGame(type, data) {
     this.ui.gameEvent(type, data);
+  }
+
+  onProjector(on) {
+    if (!on && this.raf && this.raf.w !== window) {
+      clearTimeout(this.rafGuard);
+      this.raf = 0;
+    }
+    if (on) this.syncResolution();
+    this.ui.hudSig = null;
+    this.ui.hud();
+    this.ui.render();
+    this.invalidate();
   }
 
   setLayout(layout) {
@@ -240,11 +308,27 @@ class App {
 
   setResolution(r) {
     const [jw, jh] = r.split('x').map(Number);
-    this.scene.commit('proj', st => {
+    this.applyResolution(jw, jh, false);
+  }
+
+  syncResolution() {
+    const n = this.projector.native, st = this.scene.state;
+    if (!this.live || !n || st.proj.auto === false) return;
+    if (n[0] === st.proj.jw && n[1] === st.proj.jh) return;
+    this.applyResolution(n[0], n[1], true);
+  }
+
+  applyResolution(jw, jh, auto) {
+    const live = this.live;
+    const fn = st => {
       const kx = jw / st.proj.jw, ky = jh / st.proj.jh;
       st.calibJ = st.calibJ.map(p => [p[0] * kx, p[1] * ky]);
-      st.proj = { jw, jh };
-    });
+      st.proj = live ? { jw, jh, auto } : { jw, jh };
+      if (live) st.projQuad = liveQuad(jw, jh);
+    };
+    if (auto) this.scene.apply('proj', fn);
+    else this.scene.commit('proj', fn);
+    if (live) this.fitViews(true);
   }
 
   setProjPreset(kind) {
@@ -293,6 +377,10 @@ class App {
     try { localStorage.setItem(LAST, JSON.stringify({ wallId: this.scene.state.wallId, step: this.step })); } catch (e) { }
   }
 
+  insetOn() {
+    return this.scene.state.settings.inset && this.step >= 2 && !this.live;
+  }
+
   onKey(e) {
     const down = e.type === 'keydown';
     const t = e.target;
@@ -321,6 +409,7 @@ class App {
 
   invalidate() {
     this.glDirty = true;
+    this.projDirty = true;
     this.ovDirty = true;
     this.requestFrame();
   }
@@ -337,7 +426,21 @@ class App {
   }
 
   requestFrame() {
-    if (!this.raf) this.raf = requestAnimationFrame(t => this.frame(t));
+    if (this.raf) return;
+    const w = this.projector.frameWindow() || window;
+    try {
+      this.raf = { w, id: w.requestAnimationFrame(() => this.frame()) };
+    } catch (e) {
+      this.raf = { w: window, id: requestAnimationFrame(() => this.frame()) };
+    }
+    if (this.raf.w !== window) this.rafGuard = setTimeout(() => this.kick(), 250);
+  }
+
+  kick() {
+    const r = this.raf;
+    if (!r || r.w === window) return;
+    try { r.w.cancelAnimationFrame(r.id); } catch (e) { }
+    this.raf = { w: window, id: requestAnimationFrame(() => this.frame()) };
   }
 
   renderOpts() {
@@ -351,13 +454,20 @@ class App {
       ambient: s.ambient,
       gain: s.gain,
       editorGrid: s.grid,
-      inset: s.inset && this.step >= 2,
+      inset: this.insetOn(),
+      work: this.live && this.step >= 2 && this.step <= 4 ? s.work || 0 : 0,
     };
   }
 
-  frame(now) {
-    if (this.raf) { cancelAnimationFrame(this.raf); this.raf = 0; }
+  frame() {
+    if (this.raf) {
+      const r = this.raf;
+      this.raf = 0;
+      clearTimeout(this.rafGuard);
+      try { r.w.cancelAnimationFrame(r.id); } catch (e) { }
+    }
     if (!this.ready) return;
+    const now = performance.now();
     const playing = this.step === 5 && this.game.running;
     if (playing) {
       const dt = this.last ? Math.min(0.05, (now - this.last) / 1000) : 1 / 60;
@@ -365,16 +475,33 @@ class App {
       this.game.update(dt, this.input);
       this.time += dt;
       this.glDirty = true;
+      this.projDirty = true;
     } else {
       this.last = 0;
     }
-    if (this.glDirty) {
+    const pr = this.projector, o = this.renderOpts();
+    let prepared = false;
+    const prep = () => {
+      if (prepared) return;
+      prepared = true;
+      this.renderer.prepare(o);
+    };
+    const projOn = pr.visible();
+    if (projOn && this.projDirty) {
+      this.projDirty = false;
+      prep();
+      pr.render(o);
+    }
+    const show = document.visibilityState !== 'hidden';
+    const skip = playing && projOn && this.tick++ % 3 !== 0;
+    if (show && this.glDirty && !skip) {
       this.glDirty = false;
       this.paneDirty = false;
-      this.renderer.render(this.views, this.renderOpts());
-    } else if (this.paneDirty) {
+      prep();
+      this.renderer.renderMain(this.views, o);
+    } else if (show && this.paneDirty && !this.glDirty) {
       this.paneDirty = false;
-      this.renderer.drawPanes(this.views, this.renderOpts());
+      this.renderer.drawPanes(this.views, o);
     }
     if (this.ovDirty) {
       this.ovDirty = false;

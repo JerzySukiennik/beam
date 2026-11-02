@@ -2,7 +2,7 @@
 
 A projection-mapping game and sandbox. Point a projector at a real wall, trace what hangs on it (frames, shelves, lamps), and those objects become neon platforms, water, lava, bouncers and lucky blocks for a small character to run and jump across.
 
-This is the proof of concept, and it runs without a projector. A wall photo stands in for the room and a simulated beam lights it, so you can see how the mapping lands on real objects.
+It works two ways. With a real projector over HDMI, you calibrate and draw straight on the wall. Without one, a wall photo stands in for the room and a simulated beam lights it, so you can see how the mapping lands on real objects.
 
 ## Run
 
@@ -18,15 +18,34 @@ While changing the code, run `python3 Niepotrzebne/devserver.py` instead. It ser
 
 ## Steps
 
-1. **Ściana** (wall): pick a wall photo or upload your own.
-2. **Projektor**: mark where the projector's light lands on the photo. Presets cover a projector in front, to the side or below.
+1. **Ściana** (wall): start on a real wall, or pick a wall photo or upload your own.
+2. **Projektor**: open the projector window (real wall), or mark where the projector's light lands on the photo. Presets cover a projector in front, to the side or below.
 3. **Kalibracja**: line four crosshairs up with the corners of something whose size you know, and type the size in cm. From then on everything is measured in real centimetres, so the character keeps its size whatever the projector angle.
 4. **Mapowanie** (mapping): draw shapes over the objects and give each one a type.
 5. **Gra** (play): run around on it.
 
-Each wall has a ready demo level. The **Demo** button brings it back, and Cmd+Z undoes that.
+Each photo wall has a ready demo level. The **Demo** button brings it back, and Cmd+Z undoes that.
 
 Light walls, frames and shelves show the projection best. Dark things such as a black laptop or a chair reflect almost none of it, in the preview just as in a real room.
+
+## On a real projector
+
+1. Connect the projector over HDMI. In System Settings, Displays, use it as an extended display, not a mirror.
+2. In step 1, click **Zacznij na prawdziwej ścianie** (start on a real wall). A real wall has no photo: the editor shows the projector image itself.
+3. In step 2, click **Otwórz okno projektora** (open the projector window). Chrome and Edge ask once for permission to manage windows on all screens, and after that the window lands on the projector by itself. Without that permission, or in another browser, it opens next to the editor and you drag it over.
+4. Click the image on the wall to go fullscreen. F toggles it, Esc leaves it. In fullscreen the image follows the projector's resolution, up to 1920 pixels wide.
+5. Calibrate on a sheet of A4 (or A3, 30×40 or 50×70 cm) taped to the wall. Drag the crosshairs with the mouse right on the wall. Arrow keys nudge the selected one by a pixel, Shift+arrows by ten.
+6. Draw the shapes on the wall the same way. The cursor turns into a crosshair in the projected image.
+
+The projector panel also has:
+
+- **Obraz testowy** (test pattern) for focus and keystone.
+- **Odbij w poziomie / w pionie** (flip) for a projector on the ceiling or behind a screen. The browser remembers it.
+- **Światło robocze** (work light): a grey wash in steps 2 to 4, so the wall and what hangs on it stay visible in a dark room. It is off in play.
+
+Shapes are stored in centimetres from the calibration sheet, so **Skopiuj kształty z innej ściany** (copy shapes from another wall) lines them up when both walls were calibrated on the same sheet.
+
+In play the game runs on the projector and the keyboard works in both windows. If the editor's screen goes blank when the projector goes fullscreen, turn on "Displays have separate Spaces" in System Settings, Desktop & Dock.
 
 ### Component types
 
@@ -58,7 +77,7 @@ Shapes combine with booleans (union, subtract, intersect), so a frame is a recta
 | ↓ | Drop through a platform |
 | Shift | Grab (rubbery mode) |
 | R | Restart (in play) |
-| F | Fullscreen |
+| F | Fullscreen (in the projector window: the projector's fullscreen) |
 | 0 | Fit view |
 | Cmd+Z, Cmd+Shift+Z | Undo, redo |
 
@@ -68,18 +87,18 @@ Editor tools: V select, A points, Q corners, R rectangle, O ellipse, P polygon, 
 
 ## Under the hood
 
-- **Spaces.** There are three coordinate spaces: photo pixels, projector pixels and wall centimetres. They are tied together by homographies from the projector quad and the 4-point calibration.
-- **Rendering.** The game renders straight into projector space with three.js: the camera projection is the wall-to-projector homography. UnrealBloom provides the neon glow. Characters are drawn after the bloom, so they keep crisp lines with only their own glow. That image is what will later go to the projector over HDMI.
+- **Spaces.** There are three coordinate spaces: photo pixels, projector pixels and wall centimetres. They are tied together by homographies from the projector quad and the 4-point calibration. On a real wall there is no photo, so photo space is the projector image itself.
+- **Rendering.** The game renders straight into projector space with three.js: the camera projection is the wall-to-projector homography. UnrealBloom provides the neon glow. Characters are drawn after the bloom, so they keep crisp lines with only their own glow.
+- **Projector window.** `projector.html` is a same-origin popup. The editor creates a second WebGL context on its canvas that shares the scenes, camera and materials, so both windows draw one game state, each with its own bloom pipeline. The popup's animation frames drive the loop while it is visible, and in play the editor redraws only every third frame. The window finds its way onto the HDMI screen through the Window Management API.
 - **Physics.** Rapier 2D works in centimetres. The precise mode uses a kinematic character controller and the rubbery mode uses a jointed ragdoll.
 - **Rendering on demand.** The editor and calibration screens redraw only when something changes. The game loop runs only in step 5.
 - **Storage.** Scenes save to localStorage per wall, and uploaded photos go to IndexedDB.
 
 These libraries load from a CDN: three.js 0.170.0, @dimforge/rapier2d-compat 0.14.0 and clipper-lib 6.4.2.
 
-## Not in the proof of concept yet
+## Not here yet
 
 - Sound
-- The real projector window
 - Phones as controllers and editors, and multiplayer
 - "When → do" rules
 - Templates

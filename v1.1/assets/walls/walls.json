@@ -1,0 +1,120 @@
+{
+  "walls": [
+    {
+      "id": "biurko",
+      "name": "Biurko",
+      "src": "assets/walls/biurko.jpg",
+      "size": [1800, 1200],
+      "credit": { "author": "Franco Debartolo", "url": "https://unsplash.com/photos/P-6ck1BK8Wc", "license": "Unsplash License" },
+      "projQuad": [[180, 30], [1690, 0], [1640, 1000], [240, 960]],
+      "demo": {
+        "calib": [[376, 150], [725, 150], [725, 632], [376, 632]],
+        "calibCm": [50, 70],
+        "settings": { "theme": "wiosna", "palette": "cyber" },
+        "shapes": [
+          { "type": "solid", "name": "Rama Good Vibes", "rect": [376, 150, 725, 632], "holes": [{ "rect": [386, 160, 715, 622] }] },
+          { "type": "screen", "name": "Kosmos w ramie", "rect": [386, 160, 715, 622], "props": { "effect": "kosmos" } },
+          { "type": "platform", "name": "Calm", "rect": [760, 125, 1043, 341] },
+          { "type": "solid", "name": "See the good", "rect": [1085, 102, 1371, 456] },
+          { "type": "lucky", "name": "Wazon", "rect": [790, 377, 1005, 659], "props": { "item": "grzyb" } },
+          { "type": "water", "name": "Wodna winda", "poly": [[728, 152], [756, 152], [756, 376], [787, 376], [787, 656], [728, 656]] },
+          { "type": "screen", "name": "Create your story", "rect": [1061, 484, 1346, 699], "props": { "effect": "fale" } },
+          { "type": "bounce", "name": "Abażur", "quad": [[1388, 522], [1494, 522], [1510, 642], [1374, 642]] },
+          { "type": "lucky", "name": "Lucky block", "rect": [284, 600, 336, 652] },
+          { "type": "solid", "name": "Biurko", "rect": [60, 878, 1740, 1060] },
+          { "type": "solid", "name": "Doniczka", "poly": [[258, 806], [366, 806], [353, 888], [271, 888]] },
+          { "type": "solid", "name": "Globus", "circle": [422, 786, 50] },
+          { "type": "solid", "name": "Psy i książki", "poly": [[508, 892], [508, 864], [530, 864], [534, 746], [604, 746], [606, 731], [690, 731], [692, 746], [756, 746], [760, 864], [782, 864], [782, 892]] },
+          { "type": "solid", "name": "Owalna ramka", "ellipse": [1210, 812, 47, 74] },
+          { "type": "solid", "name": "Klepsydra", "rect": [1294, 719, 1377, 884] },
+          { "type": "solid", "name": "Lampa", "rect": [1515, 645, 1531, 864] },
+          { "type": "solid", "name": "Podstawa lampy", "rect": [1430, 862, 1552, 898] }
+        ],
+        "items": [
+          ["spawn", 312, 804], ["goal", 1300, 101],
+          ["coin", 422, 712], ["coin", 570, 714], ["coin", 720, 712],
+          ["coin", 742, 590], ["coin", 742, 450], ["coin", 742, 260],
+          ["coin", 470, 124], ["coin", 620, 124], ["coin", 850, 100], ["coin", 960, 100],
+          ["coin", 930, 850], ["coin", 1060, 850], ["coin", 1336, 692], ["coin", 1446, 330], ["coin", 1150, 76]
+        ]
+      }
+    },
+    {
+      "id": "galeria",
+      "name": "Galeria",
+      "src": "assets/walls/galeria.jpg",
+      "size": [1800, 1200],
+      "credit": { "author": "Jonny Caspari", "url": "https://unsplash.com/photos/KuudDjBHIlA", "license": "Unsplash License" },
+      "projQuad": [[60, 30], [1770, 60], [1730, 1170], [90, 1130]],
+      "demo": {
+        "calib": [[503, 638], [893, 638], [893, 1027], [503, 1027]],
+        "calibCm": [50, 50],
+        "settings": { "theme": "dzungla", "palette": "kwas" },
+        "shapes": [
+          { "type": "screen", "name": "Liście", "rect": [503, 638, 893, 1027], "props": { "effect": "tunel", "solid": true } },
+          { "type": "water", "name": "Wodospad", "rect": [463, 640, 501, 1200] },
+          { "type": "lucky", "name": "Czarna ramka", "rect": [63, 786, 227, 900], "props": { "item": "pioro" } },
+          { "type": "solid", "name": "Półka po lewej", "rect": [0, 680, 207, 737] },
+          { "type": "solid", "name": "Ramka na półce", "rect": [57, 585, 190, 680] },
+          { "type": "solid", "name": "Duża rama", "rect": [0, 115, 336, 514] },
+          { "type": "solid", "name": "Kółka", "rect": [288, 535, 461, 770] },
+          { "type": "platform", "name": "Mglista ramka", "rect": [510, 290, 748, 465] },
+          { "type": "ice", "name": "Czarna półka", "rect": [836, 548, 1722, 580] },
+          { "type": "lava", "name": "Lawa na półce", "rect": [1140, 538, 1226, 548] },
+          { "type": "solid", "name": "Doniczka", "rect": [863, 500, 935, 548] },
+          { "type": "solid", "name": "Siateczka", "rect": [1017, 430, 1128, 548] },
+          { "type": "solid", "name": "Czarna ramka", "rect": [1235, 453, 1392, 548] },
+          { "type": "solid", "name": "Wysoka ramka", "rect": [1498, 325, 1680, 548] },
+          { "type": "platform", "name": "Biała półka", "rect": [370, 222, 1250, 246] },
+          { "type": "solid", "name": "Turkus", "rect": [403, 70, 652, 222] },
+          { "type": "solid", "name": "Ananas", "rect": [703, 77, 866, 222] },
+          { "type": "solid", "name": "Plaster miodu", "rect": [918, 94, 1018, 222] },
+          { "type": "solid", "name": "Kwiatek", "rect": [1145, 168, 1222, 222] },
+          { "type": "solid", "name": "Trzy kolory", "rect": [1294, 108, 1700, 300] },
+          { "type": "screen", "name": "Motyl", "rect": [1000, 636, 1185, 820], "props": { "effect": "ramka" } },
+          { "type": "lucky", "name": "Home", "rect": [943, 885, 1185, 1060], "props": { "item": "grzyb" } },
+          { "type": "solid", "name": "Ptak", "rect": [1215, 742, 1465, 1060] },
+          { "type": "solid", "name": "Wysoka biała", "rect": [1500, 712, 1690, 1105] }
+        ],
+        "items": [
+          ["spawn", 160, 1126], ["goal", 1080, 221],
+          ["coin", 145, 980], ["coin", 330, 1110], ["coin", 482, 900], ["coin", 482, 760],
+          ["coin", 390, 505], ["coin", 630, 262], ["coin", 678, 200], ["coin", 899, 474],
+          ["coin", 1072, 404], ["coin", 1180, 520], ["coin", 1313, 428], ["coin", 720, 1110],
+          ["coin", 1064, 1110], ["coin", 1340, 1110], ["coin", 1030, 196]
+        ]
+      }
+    },
+    {
+      "id": "pokoj",
+      "name": "Mój pokój",
+      "src": "assets/walls/pokoj.jpg",
+      "size": [1200, 1600],
+      "projQuad": [[30, -20], [1185, -50], [1175, 935], [35, 965]],
+      "demo": {
+        "calib": [[727, 319], [1100, 273], [1080, 527], [730, 510]],
+        "calibCm": [69, 34],
+        "settings": { "theme": "zima", "palette": "ogien" },
+        "shapes": [
+          { "type": "screen", "name": "Plakat", "quad": [[95, 0], [545, 0], [562, 435], [160, 463]], "props": { "effect": "plazma" } },
+          { "type": "solid", "name": "Róg pokoju", "line": [[727, -40], [729, 960]], "width": 0.5 },
+          { "type": "solid", "name": "Brzeg wnęki", "line": [[1106, -60], [1080, 832]], "width": 0.5 },
+          { "type": "solid", "name": "Książki u góry", "poly": [[727, -40], [1106, -60], [1105, 15], [727, 100]] },
+          { "type": "solid", "name": "Książki", "poly": [[727, 100], [1105, 15], [1100, 290], [727, 335]] },
+          { "type": "solid", "name": "Książki niżej", "poly": [[730, 338], [1080, 288], [1080, 560], [730, 527]] },
+          { "type": "platform", "name": "Półka z laptopem", "poly": [[730, 686], [1057, 750], [1057, 768], [730, 706]] },
+          { "type": "platform", "name": "Półka z księżycem", "poly": [[733, 846], [856, 890], [856, 906], [733, 862]] },
+          { "type": "bounce", "name": "Księżyc", "circle": [830, 800, 38] },
+          { "type": "solid", "name": "Podstawka", "poly": [[808, 834], [852, 834], [858, 891], [804, 871]] },
+          { "type": "solid", "name": "Krzesło", "poly": [[845, 850], [858, 834], [1010, 836], [1080, 830], [1095, 845], [1095, 1110], [850, 1110]] },
+          { "type": "lucky", "name": "Świetlny blok", "rect": [885, 563, 935, 610] }
+        ],
+        "items": [
+          ["spawn", 752, 850], ["goal", 1020, 740],
+          ["coin", 790, 670], ["coin", 860, 690], ["coin", 960, 650], ["coin", 830, 735],
+          ["coin", 930, 785], ["coin", 1045, 812], ["coin", 790, 925], ["coin", 790, 590]
+        ]
+      }
+    }
+  ]
+}
