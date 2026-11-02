@@ -1,12 +1,14 @@
-// Beam: app wiring. Scene, spaces, views, renderer, projector window, game, editor tools and UI, on-demand rendering,
-// keys, walls and steps.
+// Beam: app wiring. Scene, spaces, views, renderer, projector window, room for phones, game, editor tools and UI,
+// on-demand rendering, keys, walls and steps.
 
 import * as H from './math/homography.js';
 import { Scene, blankState, clone, newId } from './scene.js';
 import { Space } from './space.js';
 import { Views } from './views.js';
 import { Renderer } from './render/renderer.js';
+import { rgb } from './render/neon.js';
 import { Projector } from './projector.js';
+import { Room } from './room.js';
 import { Game } from './game/game.js';
 import { Input, GAME_KEYS } from './game/input.js';
 import { initRapier } from './game/physics.js';
@@ -38,6 +40,7 @@ class App {
     this.staticTimer = 0;
     this.wallToken = 0;
     this.playSig = '';
+    this.levelSig = '';
     this.palNow = null;
     this.photoSize = [1600, 1000];
     this.layoutFor = { ...LAYOUTS };
@@ -48,6 +51,7 @@ class App {
     this.input = new Input();
     this.renderer = new Renderer(this.glCanvas);
     this.renderer.onAsync = () => { this.renderer.rebuild(this.scene.state); this.invalidate(); };
+    this.room = new Room(this);
     this.projector = new Projector(this);
     this.ui = new UI(this);
     this.tools = new Tools(this);
@@ -70,6 +74,7 @@ class App {
     this.views.setLayout(this.layoutFor[this.step]);
     this.resize();
     await this.selectWall(id);
+    this.room.resume();
     document.getElementById('loading').classList.add('off');
     if (!last) this.ui.toast('To gotowe demo. Strzałki: ruch, Spacja: skok. Kroki u góry pokazują, jak się robi mapowanie.', 6000);
   }
@@ -92,6 +97,7 @@ class App {
     if (kind === 'all' || kind === 'proj' || kind === 'calib') {
       this.space.update(st);
       this.renderer.setSpace(this.space, st);
+      this.room.layoutChanged();
       const aspect = st.proj.jw / st.proj.jh;
       if (aspect !== this.views.projAspect) { this.views.projAspect = aspect; this.views.arrange(); }
       if (kind !== 'calib') {
@@ -111,8 +117,13 @@ class App {
     } else {
       for (const id of [...this.tools.sel]) if (!st.shapes.some(s => s.id === id)) this.tools.sel.delete(id);
       this.buildStatic();
-      if (this.step === 5 && (kind !== 'settings' || this.playSignature() !== this.playSig)) this.restart();
+      if (this.step === 5) {
+        if (kind === 'settings' ? this.playSignature() !== this.playSig : this.levelSignature() !== this.levelSig) this.restart();
+        else if (kind !== 'settings') this.game.reload();
+      }
       this.ui.render();
+      this.room.sceneChanged();
+      if (kind === 'settings') this.room.stateChanged();
     }
     this.invalidate();
   }
@@ -131,6 +142,33 @@ class App {
   playSignature() {
     const s = this.scene.state.settings;
     return `${s.mode}|${s.players}|${s.charSize}|${s.floor}`;
+  }
+
+  levelSignature() {
+    const st = this.scene.state;
+    return JSON.stringify([st.wallId, st.proj.jw, st.proj.jh, st.projQuad, st.calibJ, st.calibCm]);
+  }
+
+  maybeRoom() {
+    if (this.live && this.step >= 4 && this.room.state === 'off') this.room.start();
+  }
+
+  onRoom() {
+    this.ui.renderRoom();
+    this.invalidate();
+  }
+
+  onPads(kind, p) {
+    const g = this.game, col = rgb(p.color);
+    if (g.running) {
+      if (kind === 'join') g.addPlayer({ kind: 'pad', id: p.cid, name: p.name, color: col });
+      else if (kind === 'leave') g.removePlayer(p.cid);
+      else g.updatePlayer(p.cid, p.name, col);
+    }
+    if (kind === 'join') this.ui.toast(`${p.name} dołącza z telefonu.`, 2200);
+    else if (kind === 'leave') this.ui.toast(`${p.name} wychodzi.`, 2200);
+    this.ui.renderRoom();
+    this.invalidate();
   }
 
   async selectWall(id) {
@@ -157,6 +195,8 @@ class App {
     this.syncResolution();
     this.fitViews(true);
     this.saveLast();
+    this.maybeRoom();
+    this.room.stateChanged();
   }
 
   async newLiveWall() {
@@ -178,6 +218,7 @@ class App {
     this.tools.sel.clear();
     this.scene.replace(demoState(wall), true);
     this.fitViews(false);
+    if (this.step === 5) this.restart();
     this.ui.toast('Wczytane demo. Cmd+Z wraca do Twojej wersji.', 2600);
   }
 
@@ -237,6 +278,8 @@ class App {
     this.ui.hud();
     this.ui.render();
     this.saveLast();
+    this.maybeRoom();
+    this.room.stateChanged();
     this.invalidate();
   }
 
@@ -248,9 +291,11 @@ class App {
     this.buildStatic();
     this.game.start();
     this.playSig = this.playSignature();
+    this.levelSig = this.levelSignature();
     this.input.clear();
     this.last = 0;
     this.ui.hud();
+    this.room.stateChanged();
     this.requestFrame();
   }
 
@@ -263,7 +308,7 @@ class App {
       clearTimeout(this.rafGuard);
       this.raf = 0;
     }
-    if (on) this.syncResolution();
+    if (on) { this.syncResolution(); this.maybeRoom(); }
     this.ui.hudSig = null;
     this.ui.hud();
     this.ui.render();
@@ -456,6 +501,8 @@ class App {
       editorGrid: s.grid,
       inset: this.insetOn(),
       work: this.live && this.step >= 2 && this.step <= 4 ? s.work || 0 : 0,
+      qr: this.room.wallQr(),
+      marks: this.room.marksOn() ? this.room.markJ() : null,
     };
   }
 

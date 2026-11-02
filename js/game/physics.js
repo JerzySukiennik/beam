@@ -1,4 +1,5 @@
 // Beam: Rapier world built from the mapped wall (cm, y up): solid outlines, one-way shelf tops and the edge of the light.
+// The static part rebuilds in place, so an edit from a phone mid-game does not respawn anyone.
 
 import RAPIER from '@dimforge/rapier2d-compat';
 import * as P from '../math/poly.js';
@@ -56,7 +57,28 @@ export class Physics {
     world.timestep = 1 / 120;
     try { world.lengthUnit = 8 * t.s; } catch (e) { }
     this.world = world;
-    this.fixed = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    this.statics(state, space);
+    const k = world.createCharacterController(0.06 * t.s);
+    k.setUp({ x: 0, y: 1 });
+    k.setSlideEnabled(true);
+    k.setMaxSlopeClimbAngle((52 * Math.PI) / 180);
+    k.setMinSlopeSlideAngle((58 * Math.PI) / 180);
+    k.enableAutostep(2.5 * t.s, 0.5 * t.s, false);
+    k.enableSnapToGround(1.4 * t.s);
+    k.setApplyImpulsesToDynamicBodies(false);
+    this.kcc = k;
+    world.step();
+  }
+
+  rebuild(state, space) {
+    if (!this.world) return;
+    this.world.removeRigidBody(this.fixed);
+    this.info.clear();
+    this.statics(state, space);
+  }
+
+  statics(state, space) {
+    this.fixed = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     for (const sh of state.shapes) {
       if (!sh.geom.length) continue;
       if (SOLID_TYPES.has(sh.type) || (sh.type === 'screen' && sh.props.solid)) {
@@ -76,16 +98,6 @@ export class Physics {
       const list = floor ? [{ pts: ring, closed: true }] : P.chainsWhere([[ring]], (nx, ny) => ny > -0.5);
       for (const c of list) this.addLine(P.closedPts(c), { kind: 'bounds', type: 'bounds' });
     }
-    const k = world.createCharacterController(0.06 * t.s);
-    k.setUp({ x: 0, y: 1 });
-    k.setSlideEnabled(true);
-    k.setMaxSlopeClimbAngle((52 * Math.PI) / 180);
-    k.setMinSlopeSlideAngle((58 * Math.PI) / 180);
-    k.enableAutostep(2.5 * t.s, 0.5 * t.s, false);
-    k.enableSnapToGround(1.4 * t.s);
-    k.setApplyImpulsesToDynamicBodies(false);
-    this.kcc = k;
-    world.step();
   }
 
   addLine(pts, info, oneWay = false) {

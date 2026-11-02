@@ -1,6 +1,8 @@
 // Beam: render pipeline. The game is drawn straight into projector pixels through the wall -> projector homography,
 // bloomed (characters go on top unbloomed, so they stay readable), then shown as the HDMI image, as light falling
 // on the room photo, and rectified in the wall editor. Each WebGL context (editor, projector window) has its own pipe.
+// The room's QR card and the four photo markers are painted last, straight into projector pixels. While a phone takes
+// its photo the rest of the image turns into flat grey light, so the wall is evenly lit and only the markers are colored.
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -15,6 +17,7 @@ const FSQ_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(posi
 const OUT_FS = `
 uniform sampler2D uGame; uniform vec2 uJ; uniform float uMode; uniform float uBright; uniform float uGrid; uniform float uWork;
 uniform mat3 uHJW; uniform float uSJW; uniform vec2 uCal; uniform vec2 uC[4];
+uniform sampler2D uQR; uniform vec4 uQRBox; uniform float uQROn; uniform float uMarkOn; uniform vec2 uM[4]; uniform float uMarkR;
 varying vec2 vUv;
 float band(float d, float w){ return 1.0 - smoothstep(w * 0.5, w * 0.5 + 1.0, d); }
 vec3 cornerColor(int i){ return i == 0 ? vec3(0.1, 0.95, 1.0) : i == 1 ? vec3(1.0, 0.3, 0.95) : i == 2 ? vec3(1.0, 0.85, 0.15) : vec3(0.35, 1.0, 0.45); }
@@ -61,6 +64,23 @@ void main(){
       float ring = band(abs(length(d) - 16.0), 2.5);
       float dotc = 1.0 - smoothstep(2.0, 3.2, length(d));
       c = mix(c, cornerColor(i), max(max(arm, ring), dotc));
+    }
+  }
+  if (uQROn > 0.5 && uMode < 0.5) {
+    vec3 h = uHJW * vec3(j, 1.0);
+    if (h.z * uSJW > 0.0) {
+      vec2 q = (h.xy / h.z - uQRBox.xy) / (uQRBox.zw - uQRBox.xy);
+      if (q.x >= 0.0 && q.x <= 1.0 && q.y >= 0.0 && q.y <= 1.0) c = texture2D(uQR, q).rgb;
+    }
+  }
+  if (uMarkOn > 0.5) {
+    c = vec3(0.42);
+    for (int i = 0; i < 4; i++) {
+      float r = length(j - uM[i]);
+      c = mix(c, vec3(0.0), (1.0 - smoothstep(uMarkR * 1.3, uMarkR * 1.3 + 1.5, r)) * 0.9);
+      float disk = 1.0 - smoothstep(uMarkR * 0.42, uMarkR * 0.42 + 1.5, r);
+      float ring = band(abs(r - uMarkR), uMarkR * 0.16);
+      c = mix(c, cornerColor(i), max(disk, ring));
     }
   }
   gl_FragColor = vec4(clamp(c * uBright, 0.0, 1.0), 1.0);
@@ -180,7 +200,7 @@ export class Renderer {
     this.particles = new Particles(3000);
     this.particles.points.renderOrder = 5;
     this.game.add(this.staticLines.mesh, this.dynLines.mesh, this.particles.points);
-    this.figLines = new LineBatch(this.lineMat, 256);
+    this.figLines = new LineBatch(this.lineMat, 1024);
     this.figScene = new THREE.Scene();
     this.figScene.add(this.figLines.mesh);
     this.timed = [this.lineMat];
@@ -202,6 +222,9 @@ export class Renderer {
       uGame: { value: null }, uJ: { value: J() }, uMode: { value: 0 }, uBright: { value: 1 }, uGrid: { value: 1 }, uWork: { value: 0 },
       uHJW: { value: new THREE.Matrix3() }, uSJW: { value: 1 }, uCal: { value: new THREE.Vector2(100, 70) },
       uC: { value: [new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2()] },
+      uQR: { value: this.blank }, uQRBox: { value: new THREE.Vector4(0, 0, 1, 1) }, uQROn: { value: 0 },
+      uMarkOn: { value: 0 }, uMarkR: { value: 30 },
+      uM: { value: [new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2()] },
     });
     this.roomMat = fsMaterial(ROOM_FS, {
       uPhoto: { value: this.blank }, uPhotoSize: { value: new THREE.Vector2(1, 1) }, uHasPhoto: { value: 0 },
@@ -250,6 +273,17 @@ export class Renderer {
 
   setDirect(on) {
     this.roomMat.uniforms.uDirect.value = on ? 1 : 0;
+  }
+
+  setQr(canvas) {
+    if (this.qrTex) this.qrTex.dispose();
+    const t = new THREE.CanvasTexture(canvas);
+    t.colorSpace = THREE.NoColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.LinearFilter;
+    t.generateMipmaps = false;
+    this.qrTex = t;
+    this.outMat.uniforms.uQR.value = t;
   }
 
   setPhoto(img) {
@@ -449,6 +483,13 @@ export class Renderer {
     u.uBright.value = o.bright ?? 1;
     u.uGrid.value = o.calibGrid ? 1 : 0;
     u.uWork.value = o.work || 0;
+    u.uQROn.value = o.qr && this.qrTex ? 1 : 0;
+    if (o.qr) u.uQRBox.value.set(o.qr.x0, o.qr.y0, o.qr.x1, o.qr.y1);
+    u.uMarkOn.value = o.marks ? 1 : 0;
+    if (o.marks) {
+      o.marks.forEach((p, i) => u.uM.value[i].set(p[0], p[1]));
+      u.uMarkR.value = Math.min(this.jw, this.jh) * 0.045;
+    }
     gl.setRenderTarget(target);
     gl.render(this.outScene, this.fsCam);
   }

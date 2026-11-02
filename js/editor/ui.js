@@ -1,4 +1,5 @@
-// Beam: DOM interface. Step tabs, top bar, tool bar, per-step side panel, stage bar, HUD, toasts and the status line.
+// Beam: DOM interface. Step tabs, top bar, tool bar, per-step side panel, stage bar, HUD, toasts, the status line and
+// the room for phones (QR code, who is connected).
 
 import { TYPES } from '../scene.js';
 import { PALETTES, EFFECTS } from '../render/neon.js';
@@ -29,7 +30,10 @@ const ICONS = {
   fit: '<path d="M3 7.5V3h4.5M12.5 3H17v4.5M17 12.5V17h-4.5M7.5 17H3v-4.5"/>',
   full: '<path d="M8 3H3v5M12 3h5v5M17 12v5h-5M3 12v5h5"/>',
   projector: '<rect x="2.5" y="7" width="10.5" height="7" rx="1.6"/><circle cx="7.6" cy="10.5" r="1.9"/><path d="M13 9.2l4.5-2.4v7.4L13 11.8" stroke-linejoin="round"/>',
+  phone: '<rect x="5.5" y="2.5" width="9" height="15" rx="2"/><path d="M8.6 14.6h2.8"/>',
 };
+
+const CONN = { rtc: 'bezpośrednio', relay: 'przez serwer', local: 'ta przeglądarka' };
 
 const icon = name => `<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6">${ICONS[name]}</svg>`;
 
@@ -108,7 +112,94 @@ export class UI {
       title: pr.attached ? 'Okno projektora jest połączone. Klik: pokaż je.' : 'Otwórz okno projektora na drugim ekranie',
       onclick: () => (pr.attached ? pr.focus() : pr.open()),
     }, h('i', { class: 'pdot' }), 'Projektor') : null;
-    this.el.topRight.replaceChildren(...[proj, h('label', { class: 'mini' }, 'Paleta', pal), mode, demo, h('span', { class: 'sep' }), undo, redo].filter(Boolean));
+    const room = app.room;
+    const phones = h('button', {
+      class: 'btn ghost rbtn' + (room.state === 'online' ? ' on' : ''),
+      title: 'Telefony jako pady i edytor ściany: pokaż kod QR',
+      onclick: () => this.openModal(),
+    }, h('i', { html: icon('phone') }), room.state === 'online' ? `${room.code} · ${room.roster().length}` : 'Telefony');
+    this.el.topRight.replaceChildren(...[proj, phones, h('label', { class: 'mini' }, 'Paleta', pal), mode, demo, h('span', { class: 'sep' }), undo, redo].filter(Boolean));
+  }
+
+  renderRoom() {
+    this.renderTopRight();
+    for (const el of this.el.panel.querySelectorAll('.roombox')) el.replaceChildren(...this.roomBody());
+    if (this.modal) this.renderModal();
+  }
+
+  roomBody() {
+    const app = this.app, room = app.room;
+    if (room.state === 'off') {
+      return [
+        h('p', {}, 'Telefony robią za pady (do 8 osób) i za edytor ściany. Wystarczy zeskanować kod aparatem.'),
+        h('button', { class: 'btn wide ibtn', onclick: () => room.start() }, h('i', { html: icon('phone') }), 'Otwórz pokój dla telefonów'),
+      ];
+    }
+    if (room.state === 'opening') return [h('p', { class: 'fine' }, 'Otwieram pokój...')];
+    if (room.state === 'error' || room.state === 'offline') {
+      return [
+        h('p', { class: 'warn' }, 'Nie udało się otworzyć pokoju. Sprawdź internet.'),
+        h('button', { class: 'btn wide', onclick: () => room.retry() }, 'Spróbuj jeszcze raz'),
+      ];
+    }
+    const pads = room.roster();
+    const list = pads.length
+      ? h('div', { class: 'pads' }, ...pads.map(p => h('div', { class: 'pad' },
+        h('i', { class: 'dot', style: `--c:${p.color}` }),
+        h('b', {}, p.name),
+        h('em', {}, (p.tab === 'edit' ? 'edytuje · ' : '') + (CONN[p.conn] || 'łączy się')),
+        h('button', { class: 'x', title: 'Rozłącz ten telefon', onclick: () => room.kick(p.cid) }, '×'))))
+      : h('p', { class: 'fine' }, 'Nikt jeszcze nie dołączył.');
+    const corners = [['tl', '↖'], ['tr', '↗'], ['bl', '↙'], ['br', '↘']];
+    return [
+      h('div', { class: 'qrrow' },
+        h('button', { class: 'qr', title: 'Pokaż duży kod', onclick: () => this.openModal() }, room.qr && room.qr.img ? h('img', { src: room.qr.img, alt: 'Kod QR pokoju' }) : null),
+        h('div', { class: 'qrinfo' },
+          h('span', { class: 'fine' }, 'Kod pokoju'),
+          h('b', { class: 'code' }, room.code),
+          h('span', { class: 'fine' }, `${pads.length} z 8 telefonów`))),
+      this.toggle('Kod QR na ścianie', room.onWall, v => { room.setWall(v); this.renderRoom(); }, 'Biała karta z kodem w rogu obrazu, w krokach 4 i 5'),
+      room.onWall ? h('div', { class: 'row' }, h('span', { class: 'fine' }, 'Róg'), this.seg(corners, room.corner, v => { room.setCorner(v); this.renderRoom(); })) : null,
+      list,
+      h('button', { class: 'btn ghost small', onclick: () => room.stop() }, 'Zamknij pokój'),
+    ];
+  }
+
+  openModal() {
+    const room = this.app.room;
+    if (room.state === 'off' || room.state === 'error' || room.state === 'offline') room.retry();
+    if (!this.modal) {
+      this.modal = h('div', { class: 'modal', onclick: e => { if (e.target === this.modal) this.closeModal(); } });
+      this.onModalKey = e => { if (e.key === 'Escape') this.closeModal(); };
+      window.addEventListener('keydown', this.onModalKey);
+      document.body.append(this.modal);
+    }
+    this.renderModal();
+  }
+
+  closeModal() {
+    if (!this.modal) return;
+    window.removeEventListener('keydown', this.onModalKey);
+    this.modal.remove();
+    this.modal = null;
+  }
+
+  renderModal() {
+    const room = this.app.room;
+    const ok = room.state === 'online' && room.qr;
+    const body = ok
+      ? [
+        room.qr.img ? h('img', { class: 'bigqr', src: room.qr.img, alt: 'Kod QR pokoju' }) : null,
+        h('b', { class: 'code big' }, room.code),
+        h('p', {}, 'Zeskanuj aparatem w telefonie. Albo wejdź na ', h('a', { href: room.url(), target: '_blank', rel: 'noopener' }, room.url().replace(/^https?:\/\//, '').replace(/\?.*$/, '')), ' i wpisz kod.'),
+        h('p', { class: 'fine' }, 'Telefon to pad do sterowania ludzikiem albo edytor kształtów na ścianie. Do 8 osób naraz.')]
+      : room.state === 'error' || room.state === 'offline'
+        ? [h('p', { class: 'warn' }, 'Nie udało się otworzyć pokoju. Sprawdź internet.'), h('button', { class: 'btn', onclick: () => room.retry() }, 'Spróbuj jeszcze raz')]
+        : [h('p', {}, 'Otwieram pokój...')];
+    this.modal.replaceChildren(h('div', { class: 'sheet' },
+      h('button', { class: 'close', title: 'Zamknij (Esc)', onclick: () => this.closeModal() }, '×'),
+      h('h3', {}, 'Telefony'),
+      ...body));
   }
 
   renderToolbar() {
@@ -378,6 +469,7 @@ export class UI {
       h('option', { value: '' }, 'Skopiuj kształty z innej ściany...'), ...others.map(w => h('option', { value: w.id }, w.name)));
     const empty = app.live ? 'Pusto. Weź Narożniki (Q) i kliknij 4 rogi ramy, myszką prosto na ścianie.' : 'Pusto. Weź Narożniki (Q) i kliknij 4 rogi ramy na zdjęciu.';
     kids.push(this.card(`Kształty (${st.shapes.length})`, st.shapes.length ? list : h('p', { class: 'fine' }, empty), others.length ? copy : null));
+    kids.push(this.card('Telefony', h('div', { class: 'roombox' }, ...this.roomBody())));
     if (app.live) kids.push(this.card('Na ścianie', ...this.workSlider()));
     kids.push(this.card('Przyciąganie',
       this.toggle('Do punktów innych kształtów', t.snapPts, v => { t.snapPts = v; }),
@@ -453,12 +545,14 @@ export class UI {
       this.card('Ruch',
         this.seg([['precise', 'Precyzyjny'], ['rubbery', 'Gumowy']], st.settings.mode, v => this.set('mode', v)),
         h('p', { class: 'fine' }, st.settings.mode === 'rubbery' ? 'Jak Human Fall Flat: chwiejny ludzik na sprężynach. Shift podnosi ręce i łapie krawędzie, puść, żeby skoczyć.' : 'Jak Mario: ostre sterowanie, skok zależy od tego, jak długo trzymasz.')),
-      this.card('Gracze',
-        this.seg([[1, '1 gracz'], [2, '2 graczy']], st.settings.players, v => this.set('players', v)),
-        h('table', { class: 'keys' },
+      this.card('Telefony', h('div', { class: 'roombox' }, ...this.roomBody())),
+      this.card('Klawiatura',
+        this.seg([[0, 'Nikt'], [1, '1 gracz'], [2, '2 graczy']], st.settings.players, v => this.set('players', v)),
+        st.settings.players > 0 ? h('table', { class: 'keys' },
           h('tr', {}, h('th', {}, ''), h('th', {}, 'Ruch'), h('th', {}, 'Skok'), h('th', {}, 'Zeskok'), h('th', {}, 'Chwyt')),
           h('tr', {}, h('td', {}, 'P1'), h('td', {}, '← →'), h('td', {}, st.settings.players > 1 ? '↑' : '↑ / Spacja'), h('td', {}, '↓'), h('td', {}, st.settings.players > 1 ? 'Prawy Shift' : 'Shift')),
-          st.settings.players > 1 ? h('tr', {}, h('td', {}, 'P2'), h('td', {}, 'A D'), h('td', {}, 'W'), h('td', {}, 'S'), h('td', {}, 'E')) : null)),
+          st.settings.players > 1 ? h('tr', {}, h('td', {}, 'P2'), h('td', {}, 'A D'), h('td', {}, 'W'), h('td', {}, 'S'), h('td', {}, 'E')) : null)
+          : h('p', { class: 'fine' }, 'Grają tylko telefony.')),
       this.card('Ludzik',
         this.slider('Wielkość', st.settings.charSize, 5, 14, 0.5, (s, v) => { s.settings.charSize = v; }, v => v + ' cm')),
       this.card('Dekoracje',
@@ -492,10 +586,10 @@ export class UI {
     const parts = [{ cls: 'coin', text: `● ${d.coins}` }];
     if (d.total) parts.push({ text: `zostało ${d.left}` });
     parts.push({ cls: 'time', text: fmtTime(d.time) });
-    d.powers.forEach((p, i) => {
-      if (p.big > 0) parts.push({ cls: 'pw big', text: `P${i + 1} duży ${Math.ceil(p.big)}` });
-      if (p.feather > 0) parts.push({ cls: 'pw feather', text: `P${i + 1} piórko ${Math.ceil(p.feather)}` });
-      if (p.star > 0) parts.push({ cls: 'pw star', text: `P${i + 1} gwiazda ${Math.ceil(p.star)}` });
+    d.players.forEach(({ name, power: p }) => {
+      if (p.big > 0) parts.push({ cls: 'pw big', text: `${name}: grzybek ${Math.ceil(p.big)}` });
+      if (p.feather > 0) parts.push({ cls: 'pw feather', text: `${name}: piórko ${Math.ceil(p.feather)}` });
+      if (p.star > 0) parts.push({ cls: 'pw star', text: `${name}: gwiazda ${Math.ceil(p.star)}` });
     });
     const sig = parts.map(p => p.text).join('|');
     if (sig === this.hudSig) return;
@@ -509,6 +603,7 @@ export class UI {
     const pr = this.app.projector;
     if (type === 'finish') {
       const parts = [`Czas ${fmtTime(data.time)}`];
+      if (data.players.length > 1) parts.unshift(`pierwsze na mecie: ${data.name}`);
       if (data.total) parts.push(`monety ${data.coins}${data.left === 0 ? ', wszystkie!' : ''}`);
       const title = data.left === 0 && data.total ? 'Perfekcyjnie!' : 'Meta!';
       this.toast(h('div', {}, h('b', {}, title), h('span', {}, parts.join(' · ')), h('button', { class: 'btn primary small', onclick: () => this.app.restart() }, 'Jeszcze raz (R)')), 0);
@@ -516,7 +611,7 @@ export class UI {
       this.updateStats(data);
     } else if (type === 'power') {
       const names = { mushroom: 'Grzybek: rośniesz', feather: 'Piórko: podwójny skok i szybowanie', star: 'Gwiazda: lawa nie parzy' };
-      this.toast(names[data.type] || '', 1800);
+      this.toast((data.many ? `${data.name}. ` : '') + (names[data.type] || ''), 1800);
     } else if (type === 'coin') {
       this.updateStats(data);
     }

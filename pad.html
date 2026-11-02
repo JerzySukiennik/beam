@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Beam pad</title>
+<meta name="description" content="Beam: telefon jako pad do ludzika na ścianie albo edytor kształtów.">
+<meta name="theme-color" content="#07080b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Beam">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2307080b'/%3E%3Crect x='3' y='9.5' width='4.5' height='5' rx='1.2' fill='%2319f0ff'/%3E%3Cpath d='M8.5 10.6 21 5.5v13l-12.5-5.1z' fill='%23ff3df2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/pad.css">
+<script type="module" src="js/pad/main.js"></script>
+</head>
+<body>
+<main id="join" class="screen">
+  <form id="joinForm" class="joinbox" autocomplete="off">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><defs><linearGradient id="beamg" x1="0" x2="1"><stop offset="0" stop-color="#19f0ff"/><stop offset="1" stop-color="#ff3df2"/></linearGradient></defs><rect x="2" y="9.5" width="5" height="5" rx="1.2" fill="#19f0ff"/><path d="M8.5 10.6 22 4.8v14.4l-13.5-5.8z" fill="url(#beamg)" opacity=".9"/></svg>
+      <span>Beam</span>
+    </div>
+    <h1>Dołącz do gry</h1>
+    <label class="field"><span>Kod pokoju</span><input id="code" class="codein" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="4" placeholder="ABCD"></label>
+    <label class="field"><span>Imię albo ksywka</span><input id="name" maxlength="14" autocorrect="off" spellcheck="false" placeholder="np. Rakieta"></label>
+    <div class="field"><span>Kolor ludzika</span><div id="colors" class="colors"></div></div>
+    <button id="go" class="btn primary big" type="submit">Dołącz</button>
+    <p id="joinErr" class="err" role="alert"></p>
+    <p class="fine">Telefon będzie padem do ludzika na ścianie albo edytorem kształtów. Kod widać na ekranie komputera i w rogu ściany.</p>
+  </form>
+</main>
+
+<main id="wait" class="screen">
+  <div class="waitbox">
+    <div id="waitSpin" class="spin"></div>
+    <h2 id="waitTitle">Łączę...</h2>
+    <p id="waitText"></p>
+    <div id="waitBtns" class="col"></div>
+  </div>
+</main>
+
+<main id="app" class="screen">
+  <header id="bar">
+    <button id="me" class="me" type="button"><i class="dot"></i><b id="meName"></b></button>
+    <span id="room" class="room"></span>
+    <span id="net" class="net"><i></i><em></em></span>
+    <nav id="tabs" class="tabs"><button type="button" data-tab="pad">Pad</button><button type="button" data-tab="edit">Ściana</button></nav>
+  </header>
+  <div id="banner" class="banner"></div>
+
+  <section id="padv" class="view">
+    <div id="dz" class="zone dz">
+      <div class="pb l" data-b="left"><svg viewBox="0 0 24 24"><path d="M15 5l-8 7 8 7z"/></svg></div>
+      <div class="pb r" data-b="right"><svg viewBox="0 0 24 24"><path d="M9 5l8 7-8 7z"/></svg></div>
+      <div class="pb d" data-b="down"><svg viewBox="0 0 24 24"><path d="M5 9l7 8 7-8z"/></svg></div>
+    </div>
+    <div class="mid">
+      <p id="st1" class="st1"></p>
+      <p id="st2" class="st2"></p>
+      <div id="roster" class="roster"></div>
+      <p class="turn">Poziomo jest wygodniej.</p>
+      <p class="keyhint">Klawiatura: strzałki albo WASD, spacja to skok, Shift chwyta.</p>
+    </div>
+    <div id="az" class="zone az">
+      <div class="pb grab" data-b="grab"><span>Chwyć</span></div>
+      <div class="pb jump" data-b="jump"><span>Skok</span></div>
+    </div>
+  </section>
+
+  <section id="editv" class="view">
+    <canvas id="ec"></canvas>
+    <div class="etop">
+      <div id="eview" class="seg"><button type="button" data-v="wall">Ściana</button><button type="button" data-v="photo">Zdjęcie</button></div>
+      <button id="eshot" class="btn small" type="button">Zdjęcie ściany</button>
+    </div>
+    <p id="enote" class="enote"></p>
+    <div id="epoly" class="epoly">
+      <button id="ppop" class="btn small" type="button">Cofnij punkt</button>
+      <button id="pclose" class="btn small primary" type="button">Zamknij kształt</button>
+    </div>
+    <nav class="ebar">
+      <button type="button" data-tool="select" title="Wybierz i przesuń"><svg viewBox="0 0 20 20"><path d="M5 3l11 6.5-4.8 1.4L9 16z" stroke-linejoin="round"/></svg><span>Wybierz</span></button>
+      <button type="button" data-tool="rect" title="Prostokąt"><svg viewBox="0 0 20 20"><rect x="3.5" y="5" width="13" height="10" rx="1.2"/></svg><span>Prostokąt</span></button>
+      <button type="button" data-tool="poly" title="Wielokąt"><svg viewBox="0 0 20 20"><path d="M4 15.5L6.5 4.5l7 3 2.5 8z" stroke-linejoin="round"/></svg><span>Wielokąt</span></button>
+      <button id="etype" type="button" title="Typ"><i class="sw"></i><span id="etypeName">Kolizja</span></button>
+      <button id="edel" type="button" title="Usuń zaznaczone"><svg viewBox="0 0 20 20"><path d="M4.5 6h11M8 6V4.5h4V6M6 6l.8 10h6.4L14 6"/></svg><span>Usuń</span></button>
+      <button id="eundo" class="ic" type="button" title="Cofnij" aria-label="Cofnij"><svg viewBox="0 0 20 20"><path d="M7 4.5L3.5 8 7 11.5"/><path d="M4 8h7.5a4.5 4.5 0 0 1 0 9H9"/></svg></button>
+      <button id="eredo" class="ic" type="button" title="Ponów" aria-label="Ponów"><svg viewBox="0 0 20 20"><path d="M13 4.5L16.5 8 13 11.5"/><path d="M16 8H8.5a4.5 4.5 0 0 0 0 9H11"/></svg></button>
+    </nav>
+  </section>
+</main>
+
+<section id="markv" class="overlay">
+  <canvas id="mc"></canvas>
+  <p id="mtext" class="mtext"></p>
+  <div class="mbar">
+    <button id="mcancel" class="btn" type="button">Anuluj</button>
+    <button id="mok" class="btn primary" type="button">Gotowe</button>
+  </div>
+</section>
+
+<div id="sheet" class="sheetwrap"></div>
+<div id="toast" class="toast" role="status"></div>
+<input id="shotFile" type="file" accept="image/*" capture="environment" hidden>
+<noscript><p class="nojs">Beam potrzebuje JavaScriptu.</p></noscript>
+</body>
+</html>

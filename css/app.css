@@ -457,6 +457,49 @@ table.keys { width: 100%; border-collapse: collapse; font-size: 12px; }
 .keys td { padding: 6px 4px; border-top: 1px solid var(--line); color: var(--soft); }
 .keys td:first-child { color: var(--dim); font-weight: 650; }
 
+.rbtn { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; font-variant-numeric: tabular-nums; }
+.rbtn i { display: grid; place-items: center; color: var(--dim); }
+.rbtn i svg { width: 17px; height: 17px; }
+.rbtn.on { border-color: rgba(25, 240, 255, 0.32); }
+.rbtn.on i { color: var(--acc); filter: drop-shadow(0 0 5px rgba(25, 240, 255, 0.45)); }
+
+.roombox { display: flex; flex-direction: column; gap: 10px; }
+.roombox p { margin: 0; color: var(--soft); }
+.roombox p.fine { color: var(--faint); font-size: 12px; }
+.roombox .row { align-items: center; }
+.roombox .row .seg { flex: 1; }
+.roombox > .btn.small { align-self: flex-start; }
+.qrrow { display: flex; align-items: center; gap: 14px; }
+.qr { flex: none; width: 96px; height: 96px; padding: 0; overflow: hidden; border: 0; border-radius: 10px; background: #fff; transition: transform 0.15s; }
+.qr:hover { transform: scale(1.03); }
+.qr img { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.qrinfo { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.qrinfo span { color: var(--faint); font-size: 12px; }
+.code { color: var(--text); font-size: 26px; font-weight: 750; letter-spacing: 0.14em; font-variant-numeric: tabular-nums; }
+.pads { display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; }
+.pad { display: flex; align-items: center; gap: 9px; min-height: 32px; padding: 4px 4px 4px 8px; border-radius: 8px; }
+.pad:hover { background: rgba(255, 255, 255, 0.04); }
+.pad .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 70%, transparent); }
+.pad b { flex: 1; min-width: 0; overflow: hidden; color: var(--soft); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.pad em { color: var(--faint); font-size: 11px; font-style: normal; white-space: nowrap; }
+.pad .x { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dim); font-size: 15px; line-height: 1; opacity: 0; transition: opacity 0.15s, background 0.15s; }
+.pad:hover .x, .pad .x:focus-visible { opacity: 1; }
+.pad .x:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+
+.modal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: rgba(3, 4, 6, 0.82); animation: fadein 0.18s ease-out; }
+.sheet { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(420px, 100%); padding: 22px 24px 24px; border: 1px solid var(--line2); border-radius: 18px; background: var(--card); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); text-align: center; animation: popin 0.24s cubic-bezier(0.2, 0.8, 0.3, 1); }
+.sheet h3 { margin: 0; color: var(--dim); font-size: 11.5px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; }
+.sheet p { margin: 0; color: var(--soft); }
+.sheet p.fine { color: var(--faint); font-size: 12px; }
+.sheet p.warn { color: var(--warn); }
+.bigqr { display: block; width: min(300px, 70vw); aspect-ratio: 1; border-radius: 14px; background: #fff; image-rendering: pixelated; }
+.code.big { margin-right: -0.2em; font-size: 42px; letter-spacing: 0.2em; }
+.sheet .close { position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dim); font-size: 20px; line-height: 1; }
+.sheet .close:hover { background: rgba(255, 255, 255, 0.07); color: var(--text); }
+@keyframes fadein { from { opacity: 0; } }
+@keyframes popin { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@media (prefers-reduced-motion: reduce) { .modal, .sheet { animation: none; } }
+
 #status {
   display: flex;
   align-items: center;

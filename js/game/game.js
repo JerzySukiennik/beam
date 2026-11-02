@@ -1,4 +1,5 @@
 // Beam: play mode. Builds physics from the mapped wall and runs players, coins, lucky drops, water waves, decor and the finish.
+// Players come from the keyboard (0 to 2) and from phones in the room, and phones can join or leave mid-game.
 
 import RAPIER from '@dimforge/rapier2d-compat';
 import * as P from '../math/poly.js';
@@ -92,14 +93,59 @@ export class Game {
     this.got = 0; this.bonus = 0;
     this.finished = false; this.fireT = 0;
     this.coins = (st.items || []).filter(i => i.type === 'coin').map(i => ({ x: i.x, y: i.y, got: false }));
-    const pal = this.pal;
-    const n = Math.max(1, Math.min(2, st.settings.players || 1));
-    const C = st.settings.mode === 'rubbery' ? Ragdoll : Player;
-    for (let i = 0; i < n; i++) {
-      const p = new C(this, i, rgb(pal.players[i]));
-      this.players.push(p);
-      this.respawn(p);
-    }
+    for (const src of this.sources()) this.addPlayer(src);
+  }
+
+  sources() {
+    const st = this.state, pal = this.pal;
+    const kb = Math.max(0, Math.min(2, st.settings.players ?? 1));
+    const out = [];
+    for (let i = 0; i < kb; i++) out.push({ kind: 'key', id: 'k' + i, slot: i, name: kb > 1 ? `P${i + 1}` : 'Klawiatura', color: rgb(pal.players[i]) });
+    for (const p of this.app.room.roster()) out.push({ kind: 'pad', id: p.cid, name: p.name, color: rgb(p.color) });
+    return out;
+  }
+
+  addPlayer(src) {
+    if (!this.running || this.players.some(p => p.src.id === src.id)) return null;
+    const used = new Set(this.players.map(p => p.idx));
+    let idx = 0;
+    while (used.has(idx)) idx++;
+    const C = this.state.settings.mode === 'rubbery' ? Ragdoll : Player;
+    const p = new C(this, idx, src.color);
+    p.src = src;
+    p.name = src.name;
+    this.players.push(p);
+    this.respawn(p);
+    return p;
+  }
+
+  removePlayer(id) {
+    const i = this.players.findIndex(p => p.src.id === id);
+    if (i < 0) return;
+    const p = this.players[i];
+    const hb = p.hitbox();
+    this.fx.emit(hb.x, hb.y, 26, { color: p.color, speed: 30 * this.t.s, life: 0.6, size: 0.35 * this.t.s, drag: 3 });
+    p.destroy();
+    this.players.splice(i, 1);
+  }
+
+  updatePlayer(id, name, color) {
+    const p = this.players.find(q => q.src.id === id);
+    if (!p) return;
+    p.name = p.src.name = name;
+    p.color = p.src.color = color;
+  }
+
+  reload() {
+    if (!this.running) return;
+    this.phys.rebuild(this.state, this.space);
+    const old = this.coins;
+    const got = (x, y) => old.some(c => c.got && Math.abs(c.x - x) < 0.01 && Math.abs(c.y - y) < 0.01);
+    this.coins = (this.state.items || []).filter(i => i.type === 'coin').map(i => ({ x: i.x, y: i.y, got: got(i.x, i.y) }));
+  }
+
+  control(p, input, kb) {
+    return p.src.kind === 'pad' ? this.app.room.control(p.src.id) : input.player(p.src.slot, kb);
   }
 
   stop() {
@@ -124,7 +170,8 @@ export class Game {
 
   respawn(p) {
     const [x, y] = this.spawnPoint();
-    p.spawn(x + (p.idx ? 3.5 * this.t.s : 0), y + 0.3);
+    const off = p.idx ? (p.idx % 2 ? 1 : -1) * Math.ceil(p.idx / 2) * 2.8 * this.t.s : 0;
+    p.spawn(x + off, y + 0.3);
     this.fx.emit(x, y + 4 * this.t.s, 22, { color: p.color, speed: 20 * this.t.s, life: 0.6, size: 0.35 * this.t.s, drag: 3 });
   }
 
@@ -137,8 +184,10 @@ export class Game {
       steps++;
       this.time += STEP;
       if (!this.finished) this.clock += STEP;
-      this.players.forEach((p, i) => p.update(STEP, input.player(i, this.players.length)));
+      const kb = this.players.filter(p => p.src.kind === 'key').length;
+      for (const p of this.players) p.update(STEP, this.control(p, input, kb));
       input.consume();
+      this.app.room.consume();
       this.updateDrops(STEP);
       this.phys.step();
       this.collect();
@@ -192,14 +241,14 @@ export class Game {
     if (type === 'mushroom') p.grow(true);
     else if (type === 'feather') { p.power.feather = 12; p.airJumps = 1; }
     else if (type === 'star') p.power.star = 9;
-    this.app.onGame('power', { type, player: p.idx });
+    this.app.onGame('power', { type, player: p.idx, name: p.name, many: this.players.length > 1 });
   }
 
   finish(p) {
     this.finished = true;
     this.fireT = 3.4;
     this.fireAcc = 0.3;
-    this.app.onGame('finish', { ...this.hud(), player: p.idx });
+    this.app.onGame('finish', { ...this.hud(), player: p.idx, name: p.name });
   }
 
   hud() {
@@ -209,7 +258,7 @@ export class Game {
       total: this.coins.length,
       time: this.clock,
       finished: this.finished,
-      powers: this.players.map(p => ({ ...p.power })),
+      players: this.players.map(p => ({ name: p.name, power: { ...p.power } })),
     };
   }
 
