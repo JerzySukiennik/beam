@@ -1,9 +1,11 @@
-// Beam: DOM interface. Step tabs, top bar, tool bar, per-step side panel, stage bar, HUD, toasts, the status line and
-// the room for phones (QR code, who is connected).
+// Beam: DOM interface. Step tabs, top bar, tool bar, per-step side panel, stage bar, HUD, toasts, the status line,
+// the room for phones (QR code, who is connected) and the round: game mode, countdown, scores and results.
 
 import { TYPES } from '../scene.js';
 import { PALETTES, EFFECTS } from '../render/neon.js';
 import { TOOLS, ITEM_TYPES } from './tools.js';
+import { PLAYS, PLAY_HINTS, BATTLE_TO, COLLECT_TIME, fmtTime } from '../game/match.js';
+import { LOOKS } from '../game/figure.js';
 
 const STEPS = [
   { n: 1, label: 'Ściana' },
@@ -53,11 +55,6 @@ export function h(tag, attrs, ...kids) {
 }
 
 const $ = s => document.querySelector(s);
-
-function fmtTime(t) {
-  const m = Math.floor(t / 60), s = t - m * 60;
-  return `${m}:${s < 10 ? '0' : ''}${s.toFixed(1)}`;
-}
 
 export class UI {
   constructor(app) {
@@ -533,26 +530,52 @@ export class UI {
     return this.card(sel.length === 1 ? 'Zaznaczony kształt' : `Zaznaczone (${sel.length})`, ...kids);
   }
 
+  setLook(i, id) {
+    this.app.scene.commit('settings', st => {
+      const l = (st.settings.looks || ['ludzik', 'kot']).slice();
+      l[i] = id;
+      st.settings.looks = l;
+    });
+  }
+
   panelPlay() {
-    const app = this.app, st = this.st;
+    const app = this.app, st = this.st, s = st.settings;
+    const play = PLAYS[s.play] ? s.play : 'coop';
+    const act = s.mode === 'rubbery' ? 'Chwyt' : play === 'battle' ? 'Cios' : null;
     this.stats = h('div', { class: 'stats' });
     this.updateStats();
+    const opts = play === 'battle'
+      ? h('div', { class: 'row' }, h('span', { class: 'fine' }, 'Do ilu punktów'), this.seg(BATTLE_TO.map(n => [n, String(n)]), s.battleTo ?? 5, v => this.set('battleTo', v)))
+      : play === 'collect'
+        ? h('div', { class: 'row' }, h('span', { class: 'fine' }, 'Czas rundy'), this.seg(COLLECT_TIME.map(n => [n, fmtTime(n)]), s.collectTime ?? 90, v => this.set('collectTime', v)))
+        : null;
+    const kb = s.players || 0;
+    const looks = s.looks || [];
+    const lookSel = i => h('label', { class: 'field' }, h('span', {}, kb > 1 ? `Wygląd P${i + 1}` : 'Wygląd'), h('select', { class: 'sel', onchange: e => this.setLook(i, e.target.value) },
+      ...Object.entries(LOOKS).map(([k, l]) => h('option', { value: k, selected: (looks[i] || (i ? 'kot' : 'ludzik')) === k }, l))));
+    const row = (who, keys) => h('tr', {}, h('td', {}, who), ...keys.slice(0, act ? 4 : 3).map(k => h('td', {}, k)));
     return [
       this.card('5. Gra',
         h('button', { class: 'btn primary wide big', onclick: () => app.restart() }, 'Od nowa (R)'),
         this.stats,
         app.projector.attached ? h('p', { class: 'fine' }, 'Gra leci na projektorze. Klawiatura działa w obu oknach.') : null),
+      this.card('Tryb gry',
+        this.seg(Object.entries(PLAYS), play, v => this.set('play', v)),
+        opts,
+        h('p', { class: 'fine' }, PLAY_HINTS[play] + (play !== 'coop' ? ' Runda zaczyna się od odliczania.' : ''))),
       this.card('Ruch',
-        this.seg([['precise', 'Precyzyjny'], ['rubbery', 'Gumowy']], st.settings.mode, v => this.set('mode', v)),
-        h('p', { class: 'fine' }, st.settings.mode === 'rubbery' ? 'Jak Human Fall Flat: chwiejny ludzik na sprężynach. Shift podnosi ręce i łapie krawędzie, puść, żeby skoczyć.' : 'Jak Mario: ostre sterowanie, skok zależy od tego, jak długo trzymasz.')),
-      this.card('Telefony', h('div', { class: 'roombox' }, ...this.roomBody())),
+        this.seg([['precise', 'Precyzyjny'], ['rubbery', 'Gumowy']], s.mode, v => this.set('mode', v)),
+        h('p', { class: 'fine' }, s.mode === 'rubbery' ? 'Jak Human Fall Flat: chwiejny ludzik na sprężynach. Chwyt podnosi ręce i łapie krawędzie albo innych graczy, puść, żeby skoczyć.' : 'Jak Mario: ostre sterowanie, skok zależy od tego, jak długo trzymasz.')),
+      this.card('Telefony', h('div', { class: 'roombox' }, ...this.roomBody()),
+        h('p', { class: 'fine' }, 'Każdy telefon wybiera swój wygląd: gotowy ludzik, rysunek palcem albo selfie na głowie.')),
       this.card('Klawiatura',
-        this.seg([[0, 'Nikt'], [1, '1 gracz'], [2, '2 graczy']], st.settings.players, v => this.set('players', v)),
-        st.settings.players > 0 ? h('table', { class: 'keys' },
-          h('tr', {}, h('th', {}, ''), h('th', {}, 'Ruch'), h('th', {}, 'Skok'), h('th', {}, 'Zeskok'), h('th', {}, 'Chwyt')),
-          h('tr', {}, h('td', {}, 'P1'), h('td', {}, '← →'), h('td', {}, st.settings.players > 1 ? '↑' : '↑ / Spacja'), h('td', {}, '↓'), h('td', {}, st.settings.players > 1 ? 'Prawy Shift' : 'Shift')),
-          st.settings.players > 1 ? h('tr', {}, h('td', {}, 'P2'), h('td', {}, 'A D'), h('td', {}, 'W'), h('td', {}, 'S'), h('td', {}, 'E')) : null)
-          : h('p', { class: 'fine' }, 'Grają tylko telefony.')),
+        this.seg([[0, 'Nikt'], [1, '1 gracz'], [2, '2 graczy']], kb, v => this.set('players', v)),
+        kb > 0 ? h('table', { class: 'keys' },
+          h('tr', {}, h('th', {}, ''), h('th', {}, 'Ruch'), h('th', {}, 'Skok'), h('th', {}, 'Zeskok'), act ? h('th', {}, act) : null),
+          row('P1', ['← →', kb > 1 ? '↑' : '↑ / Spacja', '↓', kb > 1 ? 'Prawy Shift' : 'Shift']),
+          kb > 1 ? row('P2', ['A D', 'W', 'S', 'E']) : null)
+          : h('p', { class: 'fine' }, 'Grają tylko telefony.'),
+        kb > 0 ? h('div', { class: 'row' }, lookSel(0), kb > 1 ? lookSel(1) : null) : null),
       this.card('Ludzik',
         this.slider('Wielkość', st.settings.charSize, 5, 14, 0.5, (s, v) => { s.settings.charSize = v; }, v => v + ' cm')),
       this.card('Dekoracje',
@@ -566,12 +589,43 @@ export class UI {
 
   updateStats(d) {
     if (!this.stats) return;
-    const g = this.app.game;
-    const hud = d || g.hud();
-    this.stats.replaceChildren(
-      h('div', {}, h('b', {}, hud.coins), h('span', {}, 'monet')),
-      h('div', {}, h('b', {}, hud.total ? hud.left : '–'), h('span', {}, 'zostało')),
-      h('div', {}, h('b', {}, fmtTime(hud.time)), h('span', {}, 'czas')));
+    const hud = d || this.app.game.hud();
+    const cell = (v, l) => h('div', {}, h('b', {}, v), h('span', {}, l));
+    const best = k => hud.players.reduce((m, p) => Math.max(m, p[k]), 0);
+    let cells;
+    if (hud.play === 'race') cells = [cell(fmtTime(hud.time, true), 'czas'), cell(`${hud.players.filter(p => p.done).length}/${hud.players.length}`, 'na mecie')];
+    else if (hud.play === 'battle') cells = [cell(best('score'), 'najwięcej'), cell(hud.target, 'do wygranej'), cell(fmtTime(hud.time), 'czas')];
+    else if (hud.play === 'collect') cells = [cell(fmtTime(hud.timeLeft), 'zostało'), cell(best('coins'), 'najwięcej monet')];
+    else cells = [cell(hud.coins, 'monet'), cell(hud.total ? hud.left : '–', 'zostało'), cell(fmtTime(hud.time, true), 'czas')];
+    this.stats.replaceChildren(...cells);
+  }
+
+  hudParts(d) {
+    const parts = [];
+    const chip = (text, hex) => parts.push({ cls: 'pl', text, color: hex });
+    if (d.phase === 'count') parts.push({ cls: 'dim', text: PLAYS[d.play] });
+    if (d.play === 'race') {
+      parts.push({ cls: 'time', text: fmtTime(d.time, true) });
+      for (const p of d.players) if (p.done) chip(`${p.place}. ${p.name}`, p.hex);
+    } else if (d.play === 'battle') {
+      for (const p of d.players) chip(`${p.name} ${p.score}`, p.hex);
+      parts.push({ cls: 'dim', text: `do ${d.target}` });
+    } else if (d.play === 'collect') {
+      parts.push({ cls: 'time', text: fmtTime(d.timeLeft) });
+      for (const p of d.players) chip(`${p.name} ● ${p.coins}`, p.hex);
+    } else {
+      parts.push({ cls: 'coin', text: `● ${d.coins}` });
+      if (d.total) parts.push({ text: `zostało ${d.left}` });
+      parts.push({ cls: 'time', text: fmtTime(d.time, true) });
+      const done = d.players.filter(p => p.done).length;
+      if (d.players.length > 1 && done) parts.push({ text: `na mecie ${done}/${d.players.length}` });
+    }
+    d.players.forEach(({ name, power: p }) => {
+      if (p.big > 0) parts.push({ cls: 'pw big', text: `${name}: grzybek ${Math.ceil(p.big)}` });
+      if (p.feather > 0) parts.push({ cls: 'pw feather', text: `${name}: piórko ${Math.ceil(p.feather)}` });
+      if (p.star > 0) parts.push({ cls: 'pw star', text: `${name}: gwiazda ${Math.ceil(p.star)}` });
+    });
+    return parts;
   }
 
   hud() {
@@ -583,38 +637,76 @@ export class UI {
       return;
     }
     const d = app.game.hud();
-    const parts = [{ cls: 'coin', text: `● ${d.coins}` }];
-    if (d.total) parts.push({ text: `zostało ${d.left}` });
-    parts.push({ cls: 'time', text: fmtTime(d.time) });
-    d.players.forEach(({ name, power: p }) => {
-      if (p.big > 0) parts.push({ cls: 'pw big', text: `${name}: grzybek ${Math.ceil(p.big)}` });
-      if (p.feather > 0) parts.push({ cls: 'pw feather', text: `${name}: piórko ${Math.ceil(p.feather)}` });
-      if (p.star > 0) parts.push({ cls: 'pw star', text: `${name}: gwiazda ${Math.ceil(p.star)}` });
-    });
-    const sig = parts.map(p => p.text).join('|');
+    const now = performance.now();
+    if (this.stats && now - (this.statsAt || 0) > 250) { this.statsAt = now; this.updateStats(d); }
+    const parts = this.hudParts(d);
+    const sig = parts.map(p => p.text + (p.color || '')).join('|');
     if (sig === this.hudSig) return;
     this.hudSig = sig;
-    this.el.hud.replaceChildren(...parts.map(p => h(p.cls && p.cls.startsWith('pw') ? 'i' : 'span', { class: p.cls }, p.text)));
+    this.el.hud.replaceChildren(...parts.map(p => {
+      const el = h(p.cls && p.cls.startsWith('pw') ? 'i' : 'span', { class: p.cls }, p.text);
+      if (p.color) el.style.setProperty('--c', p.color);
+      return el;
+    }));
     app.projector.hud(parts);
-    if (this.stats && Math.random() < 0.2) this.updateStats(d);
   }
 
   gameEvent(type, data) {
     const pr = this.app.projector;
-    if (type === 'finish') {
-      const parts = [`Czas ${fmtTime(data.time)}`];
-      if (data.players.length > 1) parts.unshift(`pierwsze na mecie: ${data.name}`);
-      if (data.total) parts.push(`monety ${data.coins}${data.left === 0 ? ', wszystkie!' : ''}`);
-      const title = data.left === 0 && data.total ? 'Perfekcyjnie!' : 'Meta!';
-      this.toast(h('div', {}, h('b', {}, title), h('span', {}, parts.join(' · ')), h('button', { class: 'btn primary small', onclick: () => this.app.restart() }, 'Jeszcze raz (R)')), 0);
-      pr.message(title, parts.join(' · ') + ' · R: jeszcze raz');
-      this.updateStats(data);
-    } else if (type === 'power') {
-      const names = { mushroom: 'Grzybek: rośniesz', feather: 'Piórko: podwójny skok i szybowanie', star: 'Gwiazda: lawa nie parzy' };
-      this.toast((data.many ? `${data.name}. ` : '') + (names[data.type] || ''), 1800);
-    } else if (type === 'coin') {
-      this.updateStats(data);
+    switch (type) {
+      case 'count':
+        pr.message(String(data.n), PLAYS[data.play] || '', 0, 'count');
+        this.toast(h('div', {}, h('b', {}, String(data.n)), h('span', {}, PLAYS[data.play] || '')), 1100);
+        break;
+      case 'start':
+        pr.message('Start!', '', 900, 'count');
+        this.toast(h('div', {}, h('b', {}, 'Start!')), 900);
+        if (data.play === 'battle' && this.app.game.players.length < 2) this.toast('Bitwa potrzebuje co najmniej 2 graczy: dołącz telefonem albo włącz 2 graczy na klawiaturze.', 4200);
+        break;
+      case 'goal': {
+        if (!data.many || !data.waiting) break;
+        const title = data.play === 'race' ? `${data.place}. ${data.name}` : `${data.name} na mecie`;
+        const sub = data.play === 'race' ? fmtTime(data.time, true) : `jeszcze ${data.waiting} w drodze`;
+        pr.message(title, sub, 1500);
+        this.toast(`${title} · ${sub}`, 1800);
+        break;
+      }
+      case 'point':
+        this.toast(`${data.name} zdobywa punkt: ${data.score} z ${data.to}`, 1600);
+        break;
+      case 'done':
+        this.roundOver(data);
+        break;
+      case 'power': {
+        const names = { mushroom: 'Grzybek: rośniesz', feather: 'Piórko: podwójny skok i szybowanie', star: 'Gwiazda: lawa nie parzy' };
+        this.toast((data.many ? `${data.name}. ` : '') + (names[data.type] || ''), 1800);
+        break;
+      }
+      case 'coin':
+        this.updateStats(data);
+        break;
     }
+  }
+
+  roundOver(d) {
+    const res = d.results || [], win = d.winners || [];
+    let title, sub;
+    if (d.play === 'coop' || (d.play === 'race' && res.length === 1)) {
+      const all = d.play === 'coop' && d.total && d.left === 0;
+      title = all ? 'Perfekcyjnie!' : 'Meta!';
+      const parts = [`Czas ${fmtTime(d.play === 'race' ? res[0].time || d.time : d.time, true)}`];
+      if (d.total && d.play === 'coop') parts.push(`monety ${d.coins}${all ? ', wszystkie!' : ''}`);
+      sub = parts.join(' · ');
+    } else {
+      title = win.length === 1 ? `Wygrywa: ${win[0]}` : win.length > 1 ? `Remis: ${win.join(', ')}` : 'Koniec rundy';
+      const row = r => d.play === 'race'
+        ? (r.place ? `${r.place}. ${r.name} ${fmtTime(r.time, true)}` : `${r.name}: bez mety`)
+        : d.play === 'battle' ? `${r.name} ${r.score}` : `${r.name} ● ${r.coins}`;
+      sub = res.slice(0, 8).map(row).join(' · ');
+    }
+    this.toast(h('div', {}, h('b', {}, title), h('span', {}, sub), h('button', { class: 'btn primary small', onclick: () => this.app.restart() }, 'Jeszcze raz (R)')), 0);
+    this.app.projector.message(title, sub + ' · R albo telefon: jeszcze raz');
+    this.updateStats(d);
   }
 
   toast(content, ms = 2000) {

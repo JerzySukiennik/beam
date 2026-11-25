@@ -1,6 +1,6 @@
 // Beam: wire protocol shared by the editor (the room host) and the phones.
 
-export const PROTO = 1;
+export const PROTO = 2;
 export const GAME = 'beam';
 export const CH = { EVENT: 'ev', INPUT: 'in' };
 export const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ';

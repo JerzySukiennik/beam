@@ -1,90 +1,53 @@
-// Beam: precise platformer character (Mario feel) on Rapier's kinematic character controller, plus the neon figure both modes share.
+// Beam: precise platformer character (Mario feel) on Rapier's kinematic character controller. Players stand on each
+// other's heads like on one-way shelves and ride along when the one below moves; landing hard on a head is a stomp.
 
 import RAPIER from '@dimforge/rapier2d-compat';
+import { QUERY_PLAYER } from './physics.js';
+import { drawFigure, hsv, Look } from './figure.js';
 
 const COYOTE = 0.1, BUFFER = 0.12;
+const IDLE = { left: false, right: false, jump: false, jumpPressed: false, down: false, grab: false };
 
 function approach(v, target, d) {
   return v < target ? Math.min(target, v + d) : Math.max(target, v - d);
 }
 
-export function hsv(h, s = 0.85, v = 1) {
-  const f = n => {
-    const k = (n + h * 6) % 6;
-    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
-  };
-  return [f(5), f(3), f(1)];
-}
-
-const rot = (l, a) => [l * Math.sin(a), -l * Math.cos(a)];
-
-export function drawFigure(L, o) {
-  const H = o.h, col = o.color, f = o.face;
-  const sx = 1 + o.squash * 0.6, sy = 1 - o.squash;
-  const X = (dx) => o.x + dx * sx;
-  const Y = (dy) => o.feet + dy * sy;
-  const w = 0.05 * H, g = 0.08 * H;
-  const lean = o.lean;
-  const hip = [X(lean * 0.25 * H), Y(0.42 * H)];
-  const neck = [X(lean * H * 0.9), Y(0.74 * H)];
-  const head = [X(lean * H * 1.05), Y(0.865 * H)];
-  const hr = 0.13 * H;
-  L.seg(hip[0], hip[1], neck[0], neck[1], col, w * 1.15, g, 0, 4);
-  const leg = 0.215 * H;
-  for (const side of [-1, 1]) {
-    const ph = o.swing * side;
-    let a1 = f * (ph * 0.6 + o.tuck * 0.65) + side * 0.16;
-    let a2 = a1 - f * (Math.max(0, -ph) * 0.9 + o.tuck * 1.3 + 0.08);
-    if (o.swim) { a1 = f * (0.3 + Math.sin(o.time * 9 + side) * 0.45); a2 = a1 - f * 0.5; }
-    const k = rot(leg, a1), knee = [hip[0] + k[0] * sx, hip[1] + k[1] * sy];
-    const s = rot(leg, a2), foot = [knee[0] + s[0] * sx, knee[1] + s[1] * sy];
-    L.seg(hip[0], hip[1], knee[0], knee[1], col, w, g, 0, 4);
-    L.seg(knee[0], knee[1], foot[0], foot[1], col, w, g, 0, 4);
-  }
-  const sh = [X(lean * H * 0.85), Y(0.7 * H)];
-  const arm = 0.2 * H;
-  for (const side of [-1, 1]) {
-    let a = f * (-o.swing * side * 0.75) + o.arms * f * (side > 0 ? 2.5 : 2.1) + side * 0.5 * (1 - o.arms);
-    if (o.swim) a = f * (1.6 + Math.sin(o.time * 9 + side * 1.5) * 0.9);
-    const e = rot(arm, a);
-    const el = [sh[0] + e[0] * 0.55, sh[1] + e[1] * 0.55];
-    const hand = [sh[0] + e[0], sh[1] + e[1]];
-    L.seg(sh[0], sh[1], el[0], el[1], col, w * 0.9, g * 0.9, 0, 4);
-    L.seg(el[0], el[1], hand[0], hand[1], col, w * 0.9, g * 0.9, 0, 4);
-  }
-  L.circle(head[0], head[1], hr, col, w, g, 0, 16, 4);
-  const ex = head[0] + f * hr * 0.42, ey = head[1] + hr * 0.12;
-  L.dot(ex, ey, 0.028 * H, col, 0.06 * H, 0, 4);
-  L.dot(ex - f * hr * 0.42, ey, 0.024 * H, col, 0.05 * H, 0, 4);
-  const top = [head[0], head[1] + hr];
-  const tip = [top[0] - o.ant[0] * H * 0.12, top[1] + H * 0.13 - Math.abs(o.ant[1]) * H * 0.03];
-  L.seg(top[0], top[1], tip[0], tip[1], col, w * 0.7, g * 0.7, 0, 4);
-  L.dot(tip[0], tip[1], 0.04 * H, o.accent || col, 0.12 * H, 0, 4);
-}
-
 export class Player {
-  constructor(game, idx, color) {
+  constructor(game, idx, color, look) {
     this.game = game;
     this.idx = idx;
     this.color = color;
+    this.look = new Look(look);
     this.kind = 'precise';
     this.x = 0; this.y = 0; this.vx = 0; this.vy = 0;
     this.face = 1;
     this.grounded = false; this.ground = null;
     this.coyote = 0; this.buffer = 0; this.jumping = false;
     this.drop = 0; this.inWater = false;
-    this.walk = 0; this.squash = 0; this.ant = [0, 0]; this.antV = [0, 0];
+    this.walk = 0; this.squash = 0;
     this.dead = 0; this.inv = 0;
     this.power = { big: 0, feather: 0, star: 0 };
     this.airJumps = 0;
     this.body = null; this.col = null;
+    this.carrier = null; this.riding = null; this.lastDx = 0; this.lastDy = 0;
+    this.stun = 0; this.punchT = 0; this.punchCd = 0; this.grabWas = false;
+    this.lastHit = null;
+    this.score = 0; this.coins = 0; this.done = false; this.place = 0; this.doneAt = 0;
   }
 
   get t() { return this.game.phys.t; }
   get scale() { return this.power.big > 0 ? 1.45 : 1; }
   get feet() { return this.y - this.hh - this.r; }
+  get top() { return this.y + this.hh + this.r; }
   get height() { return 2 * (this.hh + this.r); }
-  get alive() { return this.dead <= 0; }
+  get alive() { return this.dead <= 0 && !this.done; }
+  get solid() { return this.dead <= 0 && !this.done && this.inv <= 0 && !!this.body; }
+
+  standable(ent) {
+    if (ent === this || !this.solid || !ent.solid || this.carrier === ent) return false;
+    if (ent.drop > 0 || ent.vy > 1e-3) return false;
+    return ent.feet >= this.top - 0.35;
+  }
 
   makeBody(feet) {
     const ph = this.game.phys, t = this.t, k = this.scale;
@@ -92,7 +55,7 @@ export class Player {
     this.r = 1.6 * t.s * k;
     this.hh = 2.0 * t.s * k;
     this.y = feet + this.hh + this.r + 0.05;
-    const a = ph.actor(this.x, this.y, RAPIER.ColliderDesc.capsule(this.hh, this.r));
+    const a = ph.actor(this.x, this.y, RAPIER.ColliderDesc.capsule(this.hh, this.r), this);
     this.body = a.body;
     this.col = a.col;
   }
@@ -103,19 +66,48 @@ export class Player {
     this.grounded = false; this.ground = null; this.jumping = false;
     this.power = { big: 0, feather: 0, star: 0 };
     this.dead = 0; this.inv = 1.2; this.squash = 0;
+    this.carrier = null; this.stun = 0; this.punchT = 0; this.lastHit = null;
+    this.lastDx = 0; this.lastDy = 0;
     this.makeBody(feet);
   }
 
   destroy() {
     if (this.body) this.game.phys.remove(this.body);
     this.body = null;
+    this.carrier = null;
   }
 
-  die() {
-    if (this.dead > 0 || this.inv > 0) return;
+  die(by = null) {
+    if (this.dead > 0 || this.inv > 0 || this.done || !this.body) return false;
     this.game.fxBurst(this.x, this.y, this.color, 40);
     this.destroy();
     this.dead = 0.9;
+    this.game.died(this, by);
+    return true;
+  }
+
+  toGoal() {
+    this.destroy();
+    this.done = true;
+  }
+
+  knock(vx, vy, stun, by) {
+    if (!this.solid) return;
+    this.vx = vx;
+    this.vy = Math.max(this.vy, vy);
+    this.stun = Math.max(this.stun, stun);
+    this.grounded = false;
+    this.carrier = null;
+    this.squash = 0.3;
+    if (by) this.lastHit = { by, t: this.game.time };
+  }
+
+  bounceOff() {
+    this.vy = this.t.jumpV * 0.62;
+    this.grounded = false;
+    this.jumping = false;
+    this.carrier = null;
+    this.squash = -0.2;
   }
 
   grow(on) {
@@ -126,6 +118,8 @@ export class Player {
 
   update(dt, inp) {
     const g = this.game, t = this.t;
+    this.lastDx = 0; this.lastDy = 0;
+    if (this.done) return;
     if (this.dead > 0) {
       this.dead -= dt;
       if (this.dead <= 0) g.respawn(this);
@@ -136,6 +130,16 @@ export class Player {
     if (this.power.star > 0) this.power.star -= dt;
     this.inv = Math.max(0, this.inv - dt);
     this.drop = Math.max(0, this.drop - dt);
+    this.punchT = Math.max(0, this.punchT - dt);
+    this.punchCd = Math.max(0, this.punchCd - dt);
+    const stunned = this.stun > 0;
+    if (stunned) { this.stun -= dt; inp = IDLE; }
+    if (g.canPunch && inp.grab && !this.grabWas && this.punchCd <= 0) {
+      this.punchT = 0.18;
+      this.punchCd = 0.42;
+      g.punch(this);
+    }
+    this.grabWas = !!inp.grab;
     const water = g.inWater(this.x, this.y - this.hh * 0.3);
     if (water !== this.inWater) {
       g.splash(this.x, this.vy, this.y);
@@ -150,6 +154,7 @@ export class Player {
     let acc;
     if (this.grounded) acc = ice ? (dir ? 60 : 22) : dir ? (Math.sign(this.vx) === -dir ? 1100 : 620) : 900;
     else acc = dir ? 430 : 150;
+    if (stunned) acc *= 0.12;
     this.vx = approach(this.vx, dir * run, acc * t.s * dt);
     this.coyote = this.grounded ? COYOTE : this.coyote - dt;
     this.buffer = inp.jumpPressed ? BUFFER : this.buffer - dt;
@@ -163,6 +168,7 @@ export class Player {
         this.vy = t.jumpV * (this.scale > 1 ? 1.05 : 1);
         this.buffer = 0; this.coyote = 0; this.jumping = true;
         this.squash = -0.22;
+        this.carrier = null;
         g.fxJump(this);
       } else if (this.power.feather > 0 && this.airJumps > 0) {
         this.vy = t.jumpV * 0.85;
@@ -178,18 +184,32 @@ export class Player {
     this.vy -= grav * dt;
     const maxFall = water ? 40 * t.s : this.power.feather > 0 && inp.jump ? 36 * t.s : 330 * t.s;
     if (this.vy < -maxFall) this.vy = -maxFall;
-    if (inp.down && this.grounded && this.ground && this.ground.kind === 'platform') this.drop = 0.25;
+    if (inp.down && this.grounded && this.ground && (this.ground.kind === 'platform' || this.ground.kind === 'actor')) this.drop = 0.25;
+    const c = this.carrier && this.carrier.solid && this.vy <= 1e-3 && this.drop <= 0 ? this.carrier : null;
+    const cx = c ? Math.max(-3, Math.min(3, c.lastDx)) : 0, cy = c ? Math.max(-3, Math.min(3, c.lastDy)) : 0;
+    this.carrier = null;
     const prevVy = this.vy, was = this.grounded, wantDx = this.vx * dt;
-    const res = g.phys.move(this, wantDx, this.vy * dt);
-    const blocked = Math.abs(res.dx) < Math.abs(wantDx) * 0.5;
+    this.riding = c;
+    const res = g.phys.move(this, wantDx + cx, c ? cy : this.vy * dt, QUERY_PLAYER);
+    this.riding = null;
+    const blocked = Math.abs(res.dx - cx) < Math.abs(wantDx) * 0.5;
     this.x += res.dx;
     this.y += res.dy;
+    this.lastDx = res.dx;
+    this.lastDy = res.dy;
     this.body.setNextKinematicTranslation({ x: this.x, y: this.y });
     this.grounded = res.grounded && this.vy <= 1e-3;
     this.ground = null;
-    let bounce = null;
+    let bounce = null, stomped = false;
     for (const h of res.hits) {
       if (!h.info) continue;
+      if (h.info.kind === 'actor') {
+        if (h.ny > 0.55) {
+          if (prevVy < -g.stompV && g.stomp(this, h.info.p)) stomped = true;
+          else { this.carrier = h.info.p; this.ground = h.info; }
+        }
+        continue;
+      }
       if (h.ny > 0.55) {
         this.ground = h.info;
         if (h.info.type === 'bounce' && prevVy < 1) bounce = h.info;
@@ -199,6 +219,15 @@ export class Player {
         else g.bonk(this);
       } else if (blocked && h.nx < -0.8 && this.vx > 0) this.vx = 0;
       else if (blocked && h.nx > 0.8 && this.vx < 0) this.vx = 0;
+    }
+    if (c && !this.carrier && !stomped && Math.abs(this.x - c.x) < (this.r + c.r) * 0.55) {
+      this.carrier = c;
+      this.ground = { kind: 'actor', p: c };
+      this.grounded = true;
+    }
+    if (stomped) {
+      this.bounceOff();
+      return;
     }
     if (this.grounded) {
       if (!was && prevVy < -70 * t.s) {
@@ -216,15 +245,8 @@ export class Player {
     }
     if (!star && (g.lavaAt(this.x, this.feet + 0.4) || g.lavaAt(this.x, this.y))) { g.fxLava(this); this.die(); return; }
     if (this.y < g.space.box.y0 - 25) { this.die(); return; }
-    this.walk += Math.abs(res.dx) * 0.55 / (t.s * this.scale);
+    this.walk += Math.abs(res.dx - cx) * 0.55 / (t.s * this.scale);
     this.squash += (0 - this.squash) * Math.min(1, dt * 12);
-    const ax = -this.vx * 0.004 - this.ant[0] * 90, ay = -this.vy * 0.003 - this.ant[1] * 90;
-    this.antV[0] = (this.antV[0] + ax * dt) * Math.exp(-6 * dt);
-    this.antV[1] = (this.antV[1] + ay * dt) * Math.exp(-6 * dt);
-    this.ant[0] += this.antV[0] * dt * 60;
-    this.ant[1] += this.antV[1] * dt * 60;
-    this.ant[0] = Math.max(-1, Math.min(1, this.ant[0]));
-    this.ant[1] = Math.max(-1, Math.min(1, this.ant[1]));
   }
 
   hitbox() {
@@ -232,19 +254,19 @@ export class Player {
   }
 
   pushers() {
-    if (this.dead > 0) return [];
+    if (this.dead > 0 || this.done) return [];
     return [{ x: this.x, y: this.feet + this.r, r: this.r * 1.1, feet: this.feet }, { x: this.x, y: this.y + this.hh * 0.5, r: this.r * 1.05, feet: this.feet }];
   }
 
-  draw(L, time) {
-    if (this.dead > 0) return;
+  draw(L, time, faces) {
+    if (this.dead > 0 || this.done || !this.body) return;
     if (this.inv > 0 && Math.floor(time * 18) % 2 === 0) return;
     const t = this.t;
     const speed = Math.min(1, Math.abs(this.vx) / (t.run * 0.6));
     const star = this.power.star > 0;
     drawFigure(L, {
       x: this.x, feet: this.feet, h: this.height * 1.02, face: this.face,
-      color: star ? hsv((time * 1.4 + this.idx * 0.25) % 1) : this.color,
+      color: star ? hsv((time * 1.4 + this.idx * 0.25) % 1) : this.stun > 0 ? this.color.map(v => v * 0.55) : this.color,
       accent: this.power.feather > 0 ? [1, 1, 1] : null,
       squash: this.squash,
       lean: Math.max(-1, Math.min(1, this.vx / t.run)) * 0.07,
@@ -252,7 +274,9 @@ export class Player {
       tuck: !this.grounded && !this.inWater ? (this.vy > 0 ? 0.55 : 0.3) : 0,
       arms: !this.grounded && !this.inWater ? (this.vy > 0 ? 0.75 : 0.45) : 0,
       swim: this.inWater && !this.grounded,
-      time, ant: this.ant,
-    });
+      punch: this.punchT > 0 ? Math.sin((1 - this.punchT / 0.18) * Math.PI) : 0,
+      vx: this.vx, vy: this.vy, grounded: this.grounded,
+      time,
+    }, this.look, faces ? (x, y, r, a) => faces.place(this.src.id, x, y, r, a) : null);
   }
 }

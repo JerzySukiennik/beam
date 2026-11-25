@@ -1,10 +1,12 @@
 // Beam: the room. Phones join from a QR code as gamepads and wall editors (WebRTC, with an RTDB relay as fallback).
 // The editor stays the only source of truth: it feeds their buttons to the game, applies their edits and streams the
-// wall back to them. It also owns the QR card and the four photo markers drawn into the projector image.
+// wall and the state of the round back to them. It also owns the QR card and the four photo markers drawn into the
+// projector image. Each phone brings its own look: a ready-made character, a drawing or a selfie.
 
 import { createHost } from './net/index.js';
 import { PROTO, MAX_PADS, BTN, PAD_COLORS, padUrl } from './net/protocol.js';
 import { TYPES, makeShape, defaultProps } from './scene.js';
+import { cleanLook, DEFAULT_LOOK } from './game/figure.js';
 import * as H from './math/homography.js';
 import * as P from './math/poly.js';
 
@@ -57,6 +59,8 @@ export class Room {
     this.sceneTimer = 0;
     this.rosterTimer = 0;
     this.boxCache = null;
+    this.gameSig = '';
+    this.gameDirty = false;
     let p = {};
     try { p = JSON.parse(localStorage.getItem(PREFS) || '{}') || {}; } catch (e) { p = {}; }
     this.onWall = p.onWall !== false;
@@ -233,6 +237,7 @@ export class Room {
     let changed = false;
     for (const [cid, t] of this.marks) if (t < now || !this.pads.has(cid)) { this.marks.delete(cid); changed = true; }
     if (changed) this.app.invalidate();
+    if (this.gameDirty || this.app.game.running) this.sendGame(false);
   }
 
   roster() {
@@ -240,8 +245,37 @@ export class Room {
   }
 
   info() {
-    const a = this.app, st = a.scene.state;
-    return { mode: st.settings.mode, step: a.step, playing: a.step === 5 && a.game.running, wall: a.walls.get(st.wallId)?.name || '', live: a.live };
+    const a = this.app, st = a.scene.state, s = st.settings;
+    const act = s.mode === 'rubbery' ? 'grab' : s.play === 'battle' ? 'punch' : null;
+    return { mode: s.mode, play: s.play || 'coop', act, step: a.step, playing: a.step === 5 && a.game.running, wall: a.walls.get(st.wallId)?.name || '', live: a.live };
+  }
+
+  gameMsg() {
+    const g = this.app.game;
+    if (!g.running || this.app.step !== 5) return { t: 'game', on: false };
+    const d = g.hud();
+    const rows = d.phase === 'done' && d.results ? d.results : d.players;
+    return {
+      t: 'game', on: true, play: d.play, phase: d.phase, n: d.count, to: d.target, free: d.free,
+      left: d.play === 'collect' ? Math.ceil(d.timeLeft) : 0,
+      win: d.winners,
+      board: rows.map(r => ({ id: r.id, name: r.name, c: r.hex, s: r.score, k: r.coins, p: r.place || 0, r: r.rank || 0, d: !!r.done })),
+    };
+  }
+
+  sendGame(force) {
+    this.gameDirty = false;
+    if (!this.host) return;
+    const msg = this.gameMsg();
+    const sig = JSON.stringify(msg);
+    if (!force && sig === this.gameSig) return;
+    this.gameSig = sig;
+    for (const p of this.roster()) this.send(p.cid, msg);
+  }
+
+  gameEvent(type) {
+    if (type === 'coin' || type === 'power') this.gameDirty = true;
+    else this.sendGame(true);
   }
 
   connect(cid) {
@@ -277,6 +311,8 @@ export class Room {
         const name = cleanName(m.name);
         if (name) p.name = name;
         if (m.color) p.color = this.freeColor(m.color, cid);
+        const look = cleanLook(m.look);
+        if (look) p.look = look;
         this.send(cid, { t: 'me', name: p.name, color: p.color });
         this.app.onPads('update', p);
         this.sendRoster();
@@ -291,6 +327,7 @@ export class Room {
       case 'op': this.op(p, m.op); break;
       case 'marks': this.mark(cid, !!m.on); break;
       case 'photo': this.sendPhoto(cid); break;
+      case 'again': this.app.again(); break;
       case 'ping': this.send(cid, { t: 'pong', at: m.at }); break;
     }
   }
@@ -310,11 +347,13 @@ export class Room {
     }
     p.name = cleanName(m.name) || `Gracz ${p.order}`;
     p.color = this.freeColor(m.color, cid);
+    p.look = cleanLook(m.look) || p.look || DEFAULT_LOOK;
     p.conn = this.host.mode(cid);
     p.tab = m.tab === 'edit' ? 'edit' : 'pad';
     if (typeof m.j === 'number') p.jn = p.used = m.j | 0;
     p.ready = true;
     this.send(cid, { t: 'welcome', cid, code: this.code, name: p.name, color: p.color, colors: PAD_COLORS, ...this.info() });
+    this.send(cid, this.gameMsg());
     if (p.tab === 'edit') this.send(cid, this.sceneMsg());
     this.app.onPads(fresh ? 'join' : 'update', p);
     this.sendRoster();
@@ -334,6 +373,7 @@ export class Room {
       const pads = this.roster().map(p => ({ cid: p.cid, name: p.name, color: p.color, tab: p.tab }));
       const msg = { t: 'roster', pads, ...this.info() };
       for (const p of this.roster()) this.send(p.cid, msg);
+      this.sendGame(true);
       this.app.onRoom();
     }, 60);
   }

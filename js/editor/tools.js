@@ -203,7 +203,7 @@ export class Tools {
     if (step === 2) return 'Przeciągnij rogi albo środek obrazu projektora. Tak ustawiasz, gdzie na zdjęciu pada światło.';
     if (step === 3 && live) return 'Przeciągnij krzyżyki na rogi kartki: myszką prosto na ścianie albo tutaj. Strzałki: o 1 piksel, Shift o 10, Tab: następny krzyżyk.';
     if (step === 3) return 'Przeciągnij 4 kolorowe krzyżyki na rogi prostokątnego obiektu i wpisz jego wymiary. Strzałki: precyzyjnie.';
-    if (step === 5) return 'Strzałki: ruch, Spacja albo ↑: skok, ↓: zeskok z półki, Shift: chwyt (tryb gumowy). R: od nowa.';
+    if (step === 5) return 'Strzałki: ruch, Spacja albo ↑: skok, ↓: zeskok z półki, Shift: chwyt (gumowy) albo cios (Bitwa). R: od nowa.';
     if (this.poly) return this.tool === 'quad' ? `Narożnik ${this.poly.pts.length + 1} z 4.` : 'Enter albo klik w pierwszy punkt: zamknij. Backspace: cofnij punkt. Esc: anuluj.';
     const t = TOOLS.find(q => q.id === this.tool);
     return t ? t.hint : '';

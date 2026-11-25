@@ -209,7 +209,10 @@ a:hover { text-decoration: underline; }
   transition: opacity 0.2s, transform 0.2s;
 }
 #hud.on { opacity: 1; transform: translate(-50%, 0); }
+#hud { flex-wrap: wrap; justify-content: center; row-gap: 4px; max-width: calc(100% - 24px); }
 #hud .coin { color: var(--warn); }
+#hud .pl { color: var(--c); }
+#hud .dim { color: var(--dim); font-size: 12px; }
 #hud .pw { padding: 2px 8px; border: 1px solid var(--line2); border-radius: 999px; font-size: 11px; font-style: normal; }
 #hud .pw.big { color: #ff8cf6; }
 #hud .pw.feather { color: #c8f7ff; }

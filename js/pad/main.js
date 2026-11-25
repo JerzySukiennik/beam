@@ -1,9 +1,12 @@
-// Beam: phone page. Joins a room by its code, then works as a gamepad for one character or as a touch editor of the
-// wall. Reconnects on its own when the link drops or the computer reloads the editor.
+// Beam: phone page. Joins a room by its code with a chosen look, then works as a gamepad for one character (showing the
+// countdown, score and results of the round) or as a touch editor of the wall. Reconnects on its own when the link
+// drops or the computer reloads the editor.
 
 import { connectClient } from '../net/index.js';
 import { PROTO, BTN, PAD_COLORS } from '../net/protocol.js';
+import { PLAYS, PLAY_HINTS, fmtTime } from '../game/match.js';
 import { Editor } from './editor.js';
+import { looks, LookPicker, Drawer, FaceCrop } from './look.js';
 import { h } from './dom.js';
 
 const NAME = 'beam.pad.name', COLOR = 'beam.pad.color', TAB = 'beam.pad.tab';
@@ -26,7 +29,7 @@ const S = {
   client: null, slot: null, welcomed: false, ever: false, ended: false,
   conn: 'connecting', rtcOk: false, upgrades: 0, upTimer: 0, upgrading: false,
   rtt: 0, lastPong: 0, helloAt: 0, tries: 0, lostAt: 0, retry: 0, lock: null,
-  info: { step: 1, playing: false, mode: 'precise', wall: '', live: false }, roster: [],
+  info: { step: 1, playing: false, mode: 'precise', play: 'coop', act: null, wall: '', live: false }, roster: [], game: null,
 };
 const pad = { touch: new Map(), keys: new Set(), bits: 0, j: 0, sentAt: 0 };
 
@@ -61,6 +64,9 @@ const editor = new Editor({
   toast,
   buzz,
 });
+const drawer = new Drawer($('#drawv'));
+const crop = new FaceCrop($('#facev'), $('#faceFile'));
+let joinPicker = null;
 
 function cidFor(code) {
   const k = 'beam.pad.cid.' + code;
@@ -109,7 +115,8 @@ function initJoin() {
   $('#name').value = get(NAME) || '';
   const c = get(COLOR);
   S.color = PAD_COLORS.includes(c) ? c : PAD_COLORS[Math.floor(Math.random() * PAD_COLORS.length)];
-  swatches($('#colors'), () => S.color, v => { S.color = v; });
+  joinPicker = new LookPicker($('#looks'), { color: () => S.color, drawer, crop });
+  swatches($('#colors'), () => S.color, v => { S.color = v; joinPicker.render(); });
   $('#code').addEventListener('input', e => { e.target.value = cleanCode(e.target.value); });
   $('#joinForm').addEventListener('submit', e => { e.preventDefault(); join(); });
   if (code && get('beam.pad.in.' + code, sessionStorage)) { join(); return; }
@@ -130,6 +137,7 @@ function join() {
   S.lostAt = 0;
   if (S.name) put(NAME, S.name);
   put(COLOR, S.color);
+  if (joinPicker) looks.pick(joinPicker.sel);
   const u = new URL(location.href);
   u.searchParams.set('r', code);
   history.replaceState(null, '', u);
@@ -221,7 +229,7 @@ async function upgrade() {
 }
 
 function hello() {
-  if (S.client) S.client.send({ t: 'hello', v: PROTO, name: S.name, color: S.color, tab: S.tab, j: pad.j });
+  if (S.client) S.client.send({ t: 'hello', v: PROTO, name: S.name, color: S.color, tab: S.tab, j: pad.j, look: looks.cur });
 }
 
 function drop() {
@@ -297,6 +305,11 @@ function onMsg(m) {
       me();
       status();
       break;
+    case 'game':
+      feel(S.game, m);
+      S.game = m;
+      status();
+      break;
     case 'scene': editor.scene(m); break;
     case 'photo': editor.hostPhoto(m); break;
     case 'added': editor.added(m); break;
@@ -313,8 +326,29 @@ function onMsg(m) {
 }
 
 function info(m) {
-  S.info = { step: m.step | 0, playing: !!m.playing, mode: m.mode === 'rubbery' ? 'rubbery' : 'precise', wall: String(m.wall || ''), live: !!m.live };
-  document.body.classList.toggle('rubbery', S.info.mode === 'rubbery');
+  const act = m.act === 'grab' || m.act === 'punch' ? m.act : null;
+  S.info = { step: m.step | 0, playing: !!m.playing, mode: m.mode === 'rubbery' ? 'rubbery' : 'precise', play: PLAYS[m.play] ? m.play : 'coop', act, wall: String(m.wall || ''), live: !!m.live };
+  document.body.classList.toggle('act', !!act);
+  $('#actName').textContent = act === 'punch' ? 'Cios' : 'Chwyć';
+}
+
+function feel(old, m) {
+  if (!m || !m.on) return;
+  const mine = b => (b && Array.isArray(b.board) ? b.board.find(r => r.id === S.cid) : null);
+  if (m.phase === 'count' && (!old || old.n !== m.n)) buzz(18);
+  else if (m.phase === 'play' && old && old.phase === 'count') buzz(60);
+  else if (m.phase === 'done' && (!old || old.phase !== 'done')) buzz([40, 60, 40]);
+  else {
+    const a = mine(old), b = mine(m);
+    if (a && b && (b.s > a.s || b.k > a.k)) buzz(25);
+  }
+}
+
+function playValue(play, b, board = false) {
+  if (play === 'battle') return String(b.s);
+  if (play === 'collect') return `● ${b.k}`;
+  if (play === 'race') return board ? (b.p ? '' : 'bez mety') : b.p ? `${b.p}. miejsce` : '';
+  return b.d ? 'na mecie' : '';
 }
 
 function showApp() {
@@ -339,13 +373,53 @@ function net() {
 }
 
 function status() {
-  const i = S.info;
-  $('#st1').textContent = i.playing ? 'Grasz!' : 'Czekamy na grę';
-  $('#st2').textContent = i.playing
-    ? `Twój ludzik świeci ${i.live ? 'na ścianie' : 'na ekranie'} w twoim kolorze.`
-    : `Komputer jest w kroku ${i.step || 1}. Ludziki ruszają w kroku 5.`;
-  $('#roster').replaceChildren(...S.roster.map(p => h('span', { class: 'chip' + (p.cid === S.cid ? ' me' : ''), style: `--c:${p.color}` },
-    h('i'), p.name + (p.cid === S.cid ? ' (ty)' : '') + (p.tab === 'edit' ? ', edytuje' : ''))));
+  const i = S.info, g = S.game && S.game.on && i.playing ? S.game : null;
+  const board = g && Array.isArray(g.board) ? g.board : [];
+  const mine = board.find(b => b.id === S.cid) || null;
+  let s1, s2 = '', big = false;
+  if (!g) {
+    s1 = i.playing ? 'Grasz!' : 'Czekamy na grę';
+    s2 = i.playing ? `Twój ludzik świeci ${i.live ? 'na ścianie' : 'na ekranie'} w twoim kolorze.` : `Komputer jest w kroku ${i.step || 1}. Ludziki ruszają w kroku 5.`;
+  } else if (g.phase === 'count') {
+    s1 = String(g.n || '');
+    big = true;
+    s2 = `${PLAYS[g.play] || ''}. ${PLAY_HINTS[g.play] || ''}`;
+  } else if (g.phase === 'done') {
+    const win = Array.isArray(g.win) ? g.win : [];
+    if (g.play === 'coop' || board.length < 2) s1 = 'Meta!';
+    else if (mine && mine.r === 1 && win.length === 1) s1 = 'Wygrywasz!';
+    else if (mine && mine.r === 1 && win.length > 1) s1 = 'Remis!';
+    else if (win.length) s1 = `Wygrywa: ${win.join(', ')}`;
+    else s1 = 'Koniec rundy';
+    if (g.play !== 'coop' && mine && mine.r > 1) s2 = `Twoje miejsce: ${mine.r}.`;
+  } else if (g.play === 'race') {
+    s1 = mine && mine.d ? `${mine.p}. miejsce` : 'Wyścig!';
+    s2 = mine && mine.d ? 'Czekamy na resztę.' : 'Kto pierwszy na mecie.';
+  } else if (g.play === 'battle') {
+    s1 = `${mine ? mine.s : 0} z ${g.to}`;
+    s2 = i.act === 'punch' ? 'Skacz innym na głowy. Cios odpycha.' : 'Skacz innym na głowy, łap i rzucaj.';
+  } else if (g.play === 'collect') {
+    s1 = `● ${mine ? mine.k : 0}`;
+    s2 = `Zostało ${fmtTime(g.left)}`;
+  } else {
+    s1 = mine && mine.d ? 'Na mecie!' : 'Do mety!';
+    s2 = g.free ? 'Na tej ścianie nie ma mety.' : 'Wszyscy muszą dojść. Można stawać sobie na głowach.';
+  }
+  const st1 = $('#st1');
+  if (st1.textContent !== s1) {
+    st1.textContent = s1;
+    if (big) { st1.classList.remove('big'); void st1.offsetWidth; }
+  }
+  st1.classList.toggle('big', big);
+  $('#st2').textContent = s2;
+  const done = !!g && g.phase === 'done';
+  const rows = done && g.play !== 'coop' && board.length > 1 ? board.slice(0, 8) : [];
+  $('#board').replaceChildren(...rows.map(b => h('div', { class: 'brow' + (b.id === S.cid ? ' me' : ''), style: `--c:${b.c}` },
+    h('b', {}, b.r ? `${b.r}.` : '–'), h('i'), h('span', {}, b.name + (b.id === S.cid ? ' (ty)' : '')), h('em', {}, playValue(g.play, b, true)))));
+  $('#again').classList.toggle('on', done);
+  const chips = rows.length ? [] : g ? board.map(b => ({ cid: b.id, name: b.name, color: b.c, extra: playValue(g.play, b) })) : S.roster.map(p => ({ ...p, extra: p.tab === 'edit' ? 'edytuje' : '' }));
+  $('#roster').replaceChildren(...chips.map(p => h('span', { class: 'chip' + (p.cid === S.cid ? ' me' : ''), style: `--c:${p.color}` },
+    h('i'), p.name + (p.cid === S.cid ? ' (ty)' : '') + (p.extra ? `, ${p.extra}` : ''))));
 }
 
 function setTab(tab, notify = true) {
@@ -363,16 +437,21 @@ function meSheet() {
   const taken = new Set(S.roster.filter(p => p.cid !== S.cid).map(p => p.color));
   const input = h('input', { maxlength: 14, value: S.name, autocorrect: 'off', spellcheck: 'false' });
   const box = h('div', { class: 'colors' });
-  swatches(box, () => color, v => { color = v; }, taken);
+  const lbox = h('div', { class: 'looks' });
+  const picker = new LookPicker(lbox, { color: () => color, drawer, crop });
+  swatches(box, () => color, v => { color = v; picker.render(); }, taken);
   const save = () => {
     const name = cleanName(input.value) || S.name;
-    if (S.client && S.welcomed) S.client.send({ t: 'me', name, color });
+    looks.pick(picker.sel);
+    if (joinPicker) { joinPicker.sel = picker.sel; joinPicker.render(); }
+    if (S.client && S.welcomed) S.client.send({ t: 'me', name, color, look: looks.cur });
     sheet.close();
   };
   sheet.open(h('form', { class: 'sh', onsubmit: e => { e.preventDefault(); save(); } },
     h('h3', {}, 'Twój ludzik'),
     h('label', { class: 'field' }, h('span', {}, 'Imię albo ksywka'), input),
     h('div', { class: 'field' }, h('span', {}, 'Kolor'), box),
+    h('div', { class: 'field' }, h('span', {}, 'Wygląd'), lbox),
     h('div', { class: 'row' },
       h('button', { class: 'btn', type: 'button', onclick: () => sheet.close() }, 'Anuluj'),
       h('button', { class: 'btn primary', type: 'submit' }, 'Zapisz'))));
@@ -382,7 +461,7 @@ function bitsNow() {
   let b = 0;
   for (const n of pad.touch.values()) b |= BTN[n];
   for (const n of pad.keys) b |= BTN[n];
-  if (!S.info || S.info.mode !== 'rubbery') b &= ~BTN.grab;
+  if (!S.info || !S.info.act) b &= ~BTN.grab;
   return b;
 }
 
@@ -452,6 +531,10 @@ bindZone($('#dz'));
 bindZone($('#az'));
 for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => setTab(b.dataset.tab));
 $('#me').addEventListener('click', meSheet);
+$('#again').addEventListener('click', () => {
+  if (S.client && S.welcomed) S.client.send({ t: 'again' });
+  buzz(10);
+});
 $('#padv').addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
 
@@ -487,5 +570,5 @@ setInterval(() => {
   if (S.welcomed ? now() - S.lastPong > 7000 : now() - S.helloAt > 15000) lost('timeout');
 }, 2000);
 
-window.beamPad = { S, pad, editor };
+window.beamPad = { S, pad, editor, looks, drawer, crop };
 initJoin();

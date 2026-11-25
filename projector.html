@@ -13,9 +13,12 @@ body { color: #e8ecf4; font: 600 16px/1.3 -apple-system, BlinkMacSystemFont, "SF
 #gl, #ov { position: absolute; left: 0; top: 0; display: block; width: 100%; height: 100%; }
 #gl { object-fit: contain; }
 #ov { touch-action: none; }
-#hud { position: absolute; top: 3.4vh; left: 50%; display: flex; align-items: center; gap: 3.4vh; font-size: 3.4vh; font-variant-numeric: tabular-nums; white-space: nowrap; text-shadow: 0 0 1.4vh rgba(25, 240, 255, 0.55); pointer-events: none; opacity: 0; transform: translateX(-50%); transition: opacity 0.25s; }
+#hud { position: absolute; top: 3.4vh; left: 50%; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1vh 3.4vh; width: max-content; max-width: 92vw; font-size: 3.4vh; font-variant-numeric: tabular-nums; white-space: nowrap; text-shadow: 0 0 1.4vh rgba(25, 240, 255, 0.55); pointer-events: none; opacity: 0; transform: translateX(-50%); transition: opacity 0.25s; }
 #hud.on { opacity: 1; }
+#hud.many { gap: 0.8vh 2.6vh; font-size: 2.7vh; }
 #hud .coin { color: #ffd23d; text-shadow: 0 0 1.4vh rgba(255, 210, 61, 0.6); }
+#hud .pl { color: var(--c); text-shadow: 0 0 1.4vh var(--c); }
+#hud .dim { color: #8d95a8; text-shadow: none; font-size: 2.6vh; }
 #hud .pw { font-size: 2.4vh; }
 #hud .pw.big { color: #ff8cf6; }
 #hud .pw.feather { color: #c8f7ff; }
@@ -24,6 +27,9 @@ body { color: #e8ecf4; font: 600 16px/1.3 -apple-system, BlinkMacSystemFont, "SF
 #msg.on { opacity: 1; }
 #msg b { font-size: 6vh; text-shadow: 0 0 2.2vh rgba(25, 240, 255, 0.7); }
 #msg span { color: #c3cad8; font-size: 2.6vh; font-weight: 500; }
+#msg.count b { font-size: 30vh; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 0 4vh rgba(25, 240, 255, 0.8); animation: pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
+#msg span:empty { display: none; }
+@keyframes pop { from { transform: scale(1.5); opacity: 0; } }
 </style>
 </head>
 <body>

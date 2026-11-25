@@ -315,13 +315,14 @@ export class Projector {
     this.message(null);
   }
 
-  message(title, sub = '', ms = 0) {
+  message(title, sub = '', ms = 0, cls = '') {
     const m = this.msgEl;
     if (!m || !this.attached) return;
     clearTimeout(this.msgTimer);
     if (!title && !this.isFull() && !this.noFull) {
       title = 'Kliknij tutaj';
       sub = 'Włączy się pełny ekran projektora. F przełącza, Esc wychodzi.';
+      cls = '';
     }
     if (!title) { m.classList.remove('on'); return; }
     const b = this.doc.createElement('b');
@@ -329,7 +330,7 @@ export class Projector {
     const s = this.doc.createElement('span');
     s.textContent = sub;
     m.replaceChildren(b, s);
-    m.classList.add('on');
+    m.className = 'on' + (cls ? ' ' + cls : '');
     if (ms) this.msgTimer = setTimeout(() => this.message(null), ms);
   }
 
@@ -340,9 +341,11 @@ export class Projector {
     el.replaceChildren(...parts.map(p => {
       const s = this.doc.createElement('span');
       if (p.cls) s.className = p.cls;
+      if (p.color) s.style.setProperty('--c', p.color);
       s.textContent = p.text;
       return s;
     }));
+    el.classList.toggle('many', parts.length > 6);
     el.classList.add('on');
   }
 }

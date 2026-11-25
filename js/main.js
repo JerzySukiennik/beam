@@ -120,6 +120,7 @@ class App {
       if (this.step === 5) {
         if (kind === 'settings' ? this.playSignature() !== this.playSig : this.levelSignature() !== this.levelSig) this.restart();
         else if (kind !== 'settings') this.game.reload();
+        else this.game.refreshLooks();
       }
       this.ui.render();
       this.room.sceneChanged();
@@ -141,7 +142,7 @@ class App {
 
   playSignature() {
     const s = this.scene.state.settings;
-    return `${s.mode}|${s.players}|${s.charSize}|${s.floor}`;
+    return `${s.mode}|${s.players}|${s.charSize}|${s.floor}|${s.play}|${s.battleTo}|${s.collectTime}`;
   }
 
   levelSignature() {
@@ -161,9 +162,9 @@ class App {
   onPads(kind, p) {
     const g = this.game, col = rgb(p.color);
     if (g.running) {
-      if (kind === 'join') g.addPlayer({ kind: 'pad', id: p.cid, name: p.name, color: col });
+      if (kind === 'join') g.addPlayer({ kind: 'pad', id: p.cid, name: p.name, hex: p.color, color: col, look: p.look });
       else if (kind === 'leave') g.removePlayer(p.cid);
-      else g.updatePlayer(p.cid, p.name, col);
+      else g.updatePlayer(p.cid, p.name, col, p.color, p.look);
     }
     if (kind === 'join') this.ui.toast(`${p.name} dołącza z telefonu.`, 2200);
     else if (kind === 'leave') this.ui.toast(`${p.name} wychodzi.`, 2200);
@@ -301,6 +302,11 @@ class App {
 
   onGame(type, data) {
     this.ui.gameEvent(type, data);
+    this.room.gameEvent(type, data);
+  }
+
+  again() {
+    if (this.step === 5 && this.game.running && this.game.finished) this.restart();
   }
 
   onProjector(on) {
@@ -492,7 +498,7 @@ class App {
     const s = this.scene.state.settings, T = this.time;
     return {
       time: T,
-      draw: this.game.space ? (L, parts, pal, F) => this.game.draw(L, parts, pal, T, F) : null,
+      draw: this.game.space ? (L, parts, pal, F, faces) => this.game.draw(L, parts, pal, T, F, faces) : null,
       mode: this.step === 3 ? 2 : this.step === 2 && this.testPattern ? 1 : 0,
       bright: 1,
       calibGrid: s.calibGrid,

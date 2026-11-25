@@ -1,6 +1,7 @@
 // Beam: render pipeline. The game is drawn straight into projector pixels through the wall -> projector homography,
 // bloomed (characters go on top unbloomed, so they stay readable), then shown as the HDMI image, as light falling
 // on the room photo, and rectified in the wall editor. Each WebGL context (editor, projector window) has its own pipe.
+// Selfie faces sit under the character lines, pre-distorted so the tone map gives back their real colors.
 // The room's QR card and the four photo markers are painted last, straight into projector pixels. While a phone takes
 // its photo the rest of the image turns into flat grey light, so the wall is evenly lit and only the markers are colored.
 
@@ -149,6 +150,19 @@ void main(){
 
 const INSET_FS = `uniform sampler2D uProj; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(uProj, vUv).rgb, 1.0); }`;
 
+const FACE_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+
+const FACE_FS = `
+uniform sampler2D uTex; varying vec2 vUv;
+void main(){
+  float r = length(vUv * 2.0 - 1.0);
+  float a = 1.0 - smoothstep(0.93, 1.0, r);
+  if (a <= 0.0) discard;
+  vec3 lin = pow(texture2D(uTex, vUv).rgb, vec3(2.2));
+  vec3 g = -log(max(1.0 - lin * 0.97, vec3(0.02))) / 1.35;
+  gl_FragColor = vec4(g, a);
+}`;
+
 function fsScene(material) {
   const s = new THREE.Scene();
   const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
@@ -201,8 +215,23 @@ export class Renderer {
     this.particles.points.renderOrder = 5;
     this.game.add(this.staticLines.mesh, this.dynLines.mesh, this.particles.points);
     this.figLines = new LineBatch(this.lineMat, 1024);
+    this.figLines.mesh.renderOrder = 1;
     this.figScene = new THREE.Scene();
     this.figScene.add(this.figLines.mesh);
+    this.faces = new Map();
+    this.faceGeo = new THREE.PlaneGeometry(2, 2);
+    this.facesOn = false;
+    this.facePen = {
+      place: (id, x, y, r, a) => {
+        const f = this.faces.get(id);
+        if (!f || !f.ready) return;
+        f.mesh.position.set(x, y, 0);
+        f.mesh.scale.set(r, r, 1);
+        f.mesh.rotation.z = a || 0;
+        f.mesh.visible = true;
+        this.facesOn = true;
+      },
+    };
     this.timed = [this.lineMat];
     this.lucky = new Map();
     this.textures = new Map();
@@ -446,6 +475,42 @@ export class Renderer {
     }
   }
 
+  setFace(id, src) {
+    const cur = this.faces.get(id);
+    if (cur && cur.src === src) return;
+    this.dropFace(id);
+    if (!src) return;
+    const tex = new THREE.Texture();
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: tex } }, vertexShader: FACE_VS, fragmentShader: FACE_FS, transparent: true, depthTest: false, depthWrite: false });
+    const mesh = new THREE.Mesh(this.faceGeo, mat);
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    mesh.renderOrder = 0;
+    const f = { src, tex, mat, mesh, ready: false };
+    const img = new Image();
+    img.onload = () => {
+      if (this.faces.get(id) !== f) return;
+      tex.image = img;
+      tex.needsUpdate = true;
+      f.ready = true;
+    };
+    img.src = src;
+    this.faces.set(id, f);
+    this.figScene.add(mesh);
+  }
+
+  dropFace(id) {
+    const f = this.faces.get(id);
+    if (!f) return;
+    this.figScene.remove(f.mesh);
+    f.mat.dispose();
+    f.tex.dispose();
+    this.faces.delete(id);
+  }
+
   setLucky(id, used, flash, bump) {
     const l = this.lucky.get(id);
     if (!l) return;
@@ -458,7 +523,9 @@ export class Renderer {
     for (const m of this.timed) m.uniforms.uTime.value = o.time;
     this.dynLines.begin();
     this.figLines.begin();
-    if (o.draw) o.draw(this.dynLines, this.particles, this.pal, this.figLines);
+    this.facesOn = false;
+    for (const f of this.faces.values()) f.mesh.visible = false;
+    if (o.draw) o.draw(this.dynLines, this.particles, this.pal, this.figLines, this.facePen);
     this.dynLines.end();
     this.figLines.end();
   }
@@ -475,7 +542,7 @@ export class Renderer {
     this.particles.touch();
     pipe.composer.render(0);
     gl.setRenderTarget(pipe.composer.readBuffer);
-    if (this.figLines.n) gl.render(this.figScene, this.camera);
+    if (this.figLines.n || this.facesOn) gl.render(this.figScene, this.camera);
     if (this.maskScene.children.length) gl.render(this.maskScene, this.camera);
     const u = this.outMat.uniforms;
     u.uGame.value = pipe.composer.readBuffer.texture;

@@ -1,14 +1,18 @@
 // Beam: Rapier world built from the mapped wall (cm, y up): solid outlines, one-way shelf tops and the edge of the light.
-// The static part rebuilds in place, so an edit from a phone mid-game does not respawn anyone.
+// The static part rebuilds in place, so an edit from a phone mid-game does not respawn anyone. Precise characters are
+// one-way platforms for each other (stand on a head, pass through from the side); ragdolls collide for real.
 
 import RAPIER from '@dimforge/rapier2d-compat';
 import * as P from '../math/poly.js';
 import { SOLID_TYPES } from '../scene.js';
 
 export const GROUP_WORLD = 0x0001;
+export const GROUP_ITEM = 0x4000;
 export const GROUP_ACTOR = 0x8000;
+export const RAG_BITS = 0x3ffe;
 export const groups = (member, filter) => (((member & 0xffff) << 16) | (filter & 0xffff)) >>> 0;
 export const QUERY_WORLD = groups(0xffff, GROUP_WORLD);
+export const QUERY_PLAYER = groups(0xffff, GROUP_WORLD | GROUP_ACTOR);
 
 let ready = null;
 export function initRapier() {
@@ -32,6 +36,7 @@ export class Physics {
   constructor() {
     this.world = null;
     this.info = new Map();
+    this.actors = new Map();
     this.parts = new Map();
     this.kcc = null;
     const C = () => RAPIER.SolverFlags.COMPUTE_IMPULSE, E = () => RAPIER.SolverFlags.EMPTY;
@@ -75,6 +80,7 @@ export class Physics {
     this.world.removeRigidBody(this.fixed);
     this.info.clear();
     this.statics(state, space);
+    this.world.updateSceneQueries();
   }
 
   statics(state, space) {
@@ -118,37 +124,48 @@ export class Physics {
     return y === null ? -Infinity : y;
   }
 
-  actor(x, y, desc) {
+  actor(x, y, desc, owner = null) {
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x, y));
-    const col = this.world.createCollider(desc.setCollisionGroups(groups(GROUP_ACTOR, 0)), body);
+    const col = this.world.createCollider(desc.setCollisionGroups(owner ? groups(GROUP_ACTOR, 0xffff) : groups(GROUP_ITEM, 0)), body);
+    if (owner) this.actors.set(col.handle, { kind: 'actor', p: owner });
     return { body, col };
   }
 
   remove(body) {
-    if (this.world && body) this.world.removeRigidBody(body);
+    if (!this.world || !body) return;
+    for (let i = 0, n = body.numColliders(); i < n; i++) this.actors.delete(body.collider(i).handle);
+    this.world.removeRigidBody(body);
   }
 
   pred(ent) {
     return col => {
-      const inf = this.info.get(col.handle);
+      const inf = this.info.get(col.handle) || this.actors.get(col.handle);
       if (!inf) return false;
+      if (inf.kind === 'actor') return inf.p !== ent.riding && inf.p.standable(ent);
       if (inf.kind !== 'platform') return true;
       if (ent.drop > 0 || ent.vy > 1e-3) return false;
       return ent.feet >= this.surfaceY(inf, ent.x) - 0.3;
     };
   }
 
-  move(ent, dx, dy) {
+  move(ent, dx, dy, filter = QUERY_WORLD) {
     const k = this.kcc;
-    k.computeColliderMovement(ent.col, { x: dx, y: dy }, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, QUERY_WORLD, this.pred(ent));
+    k.computeColliderMovement(ent.col, { x: dx, y: dy }, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, filter, this.pred(ent));
     const m = k.computedMovement();
     const hits = [];
     for (let i = 0, n = k.numComputedCollisions(); i < n; i++) {
       const c = k.computedCollision(i);
       if (!c || !c.collider) continue;
-      hits.push({ info: this.info.get(c.collider.handle), nx: c.normal1.x, ny: c.normal1.y });
+      const h = c.collider.handle;
+      hits.push({ info: this.info.get(h) || this.actors.get(h), nx: c.normal1.x, ny: c.normal1.y });
     }
     return { dx: m.x, dy: m.y, grounded: k.computedGrounded(), hits };
+  }
+
+  free(x, feet, hh, r) {
+    if (!this.world) return true;
+    const y = feet + hh + r + 0.05;
+    return !this.world.intersectionWithShape({ x, y }, 0, new RAPIER.Capsule(hh, r), RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, QUERY_WORLD);
   }
 
   rayDown(x, y, maxD, ent) {
@@ -173,6 +190,7 @@ export class Physics {
     this.world = null;
     this.kcc = null;
     this.info.clear();
+    this.actors.clear();
     this.parts.clear();
   }
 }

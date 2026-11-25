@@ -32,6 +32,10 @@ export function defaultSettings() {
     charSize: 8,
     players: 1,
     work: 0.2,
+    play: 'coop',
+    battleTo: 5,
+    collectTime: 90,
+    looks: ['ludzik', 'kot'],
   };
 }
 

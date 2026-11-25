@@ -25,6 +25,7 @@
     <label class="field"><span>Kod pokoju</span><input id="code" class="codein" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="4" placeholder="ABCD"></label>
     <label class="field"><span>Imię albo ksywka</span><input id="name" maxlength="14" autocorrect="off" spellcheck="false" placeholder="np. Rakieta"></label>
     <div class="field"><span>Kolor ludzika</span><div id="colors" class="colors"></div></div>
+    <div class="field"><span>Wygląd</span><div id="looks" class="looks"></div></div>
     <button id="go" class="btn primary big" type="submit">Dołącz</button>
     <p id="joinErr" class="err" role="alert"></p>
     <p class="fine">Telefon będzie padem do ludzika na ścianie albo edytorem kształtów. Kod widać na ekranie komputera i w rogu ściany.</p>
@@ -58,12 +59,14 @@
     <div class="mid">
       <p id="st1" class="st1"></p>
       <p id="st2" class="st2"></p>
+      <div id="board" class="board"></div>
+      <button id="again" class="btn primary again" type="button">Jeszcze raz</button>
       <div id="roster" class="roster"></div>
       <p class="turn">Poziomo jest wygodniej.</p>
-      <p class="keyhint">Klawiatura: strzałki albo WASD, spacja to skok, Shift chwyta.</p>
+      <p class="keyhint">Klawiatura: strzałki albo WASD, spacja to skok, Shift to chwyt albo cios.</p>
     </div>
     <div id="az" class="zone az">
-      <div class="pb grab" data-b="grab"><span>Chwyć</span></div>
+      <div class="pb grab" data-b="grab"><span id="actName">Chwyć</span></div>
       <div class="pb jump" data-b="jump"><span>Skok</span></div>
     </div>
   </section>
@@ -100,9 +103,31 @@
   </div>
 </section>
 
+<section id="drawv" class="overlay top">
+  <canvas class="dc"></canvas>
+  <p class="mtext">Narysuj palcem głowę i tułów w ramce. Nogi i chodzenie dorobi gra.</p>
+  <div class="mbar">
+    <button class="btn" type="button" data-a="clear">Wyczyść</button>
+    <button class="btn" type="button" data-a="undo">Cofnij</button>
+    <button class="btn" type="button" data-a="cancel">Anuluj</button>
+    <button class="btn primary" type="button" data-a="ok">Gotowe</button>
+  </div>
+</section>
+
+<section id="facev" class="overlay top">
+  <canvas class="dc"></canvas>
+  <p class="mtext">Ustaw twarz w kółku. Jednym palcem przesuwasz, dwoma przybliżasz.</p>
+  <div class="mbar">
+    <button class="btn" type="button" data-a="again">Inne zdjęcie</button>
+    <button class="btn" type="button" data-a="cancel">Anuluj</button>
+    <button class="btn primary" type="button" data-a="ok">Gotowe</button>
+  </div>
+</section>
+
 <div id="sheet" class="sheetwrap"></div>
 <div id="toast" class="toast" role="status"></div>
 <input id="shotFile" type="file" accept="image/*" capture="environment" hidden>
+<input id="faceFile" type="file" accept="image/*" capture="user" hidden>
 <noscript><p class="nojs">Beam potrzebuje JavaScriptu.</p></noscript>
 </body>
 </html>
